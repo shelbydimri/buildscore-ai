@@ -10,17 +10,32 @@ export const MODELS = {
 
 export type ModelId = (typeof MODELS)[keyof typeof MODELS];
 
-// ── Request / response contracts ──────────────────────────────────────────────
+// ── Client configuration ──────────────────────────────────────────────────────
+
+export interface ClientConfig {
+  /** Retries on 429 / 529 / network errors via SDK exponential backoff. Default: 3. */
+  maxRetries?: number;
+  /** Global per-request timeout in milliseconds. Default: 120_000 (2 min). */
+  timeoutMs?:  number;
+}
+
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_TIMEOUT_MS  = 120_000;
+
+// ── Request / response types ──────────────────────────────────────────────────
 
 export interface CompletionRequest {
-  model:      ModelId;
-  system:     string;
-  messages:   Anthropic.MessageParam[];
-  max_tokens: number;
-  temperature?: number;
+  model:                ModelId;
+  system:               string;
+  messages:             Anthropic.MessageParam[];
+  max_tokens:           number;
+  temperature?:         number;
+  /** Overrides the global timeout for this specific request. */
+  timeout_ms?:          number;
   /**
-   * When true, sends the system prompt as an ephemeral cache_control block.
-   * Set for large, stable prompts (skill definitions) to reduce latency and cost.
+   * Wraps the system prompt in an ephemeral cache_control block.
+   * Set true for large, stable prompts (skill definitions) to reduce
+   * latency and cost on repeated calls within the same cache TTL window.
    */
   cache_system_prompt?: boolean;
 }
@@ -30,10 +45,11 @@ export interface CompletionResponse {
   model:         string;
   input_tokens:  number;
   output_tokens: number;
-  stop_reason:   string | null;
+  /** Precise SDK union — avoids stringly-typed comparisons at call sites. */
+  stop_reason:   Anthropic.Message['stop_reason'];
 }
 
-// ── Error ─────────────────────────────────────────────────────────────────────
+// ── Error hierarchy ───────────────────────────────────────────────────────────
 
 export class LLMError extends Error {
   constructor(
@@ -46,44 +62,79 @@ export class LLMError extends Error {
   }
 }
 
+/** Thrown when ANTHROPIC_API_KEY is missing or the key is rejected (401). */
+export class LLMAuthError extends LLMError {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause, 401);
+    this.name = 'LLMAuthError';
+  }
+}
+
+/** Thrown after the SDK exhausts all retries on 429 / 529 responses. */
+export class LLMRateLimitError extends LLMError {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause, 429);
+    this.name = 'LLMRateLimitError';
+  }
+}
+
+/** Thrown when the request exceeds the configured or per-request timeout. */
+export class LLMTimeoutError extends LLMError {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause, 408);
+    this.name = 'LLMTimeoutError';
+  }
+}
+
 // ── Singleton client ──────────────────────────────────────────────────────────
 
 export class AnthropicClient {
   private static instance: AnthropicClient | null = null;
-  private readonly sdk: Anthropic;
+  private readonly sdk:    Anthropic;
+  private readonly config: Required<ClientConfig>;
 
-  private constructor(apiKey: string) {
-    this.sdk = new Anthropic({ apiKey });
+  private constructor(apiKey: string, config: ClientConfig) {
+    this.config = {
+      maxRetries: config.maxRetries ?? DEFAULT_MAX_RETRIES,
+      timeoutMs:  config.timeoutMs  ?? DEFAULT_TIMEOUT_MS,
+    };
+    this.sdk = new Anthropic({
+      apiKey,
+      maxRetries: this.config.maxRetries,
+      timeout:    this.config.timeoutMs,
+    });
   }
 
-  static getInstance(): AnthropicClient {
+  /**
+   * Returns the shared instance. The first call sets the config;
+   * subsequent calls ignore the config argument and return the existing instance.
+   */
+  static getInstance(config?: ClientConfig): AnthropicClient {
     if (AnthropicClient.instance) return AnthropicClient.instance;
 
     const apiKey = process.env['ANTHROPIC_API_KEY'];
     if (!apiKey) {
-      throw new LLMError('ANTHROPIC_API_KEY environment variable is not set');
+      throw new LLMAuthError('ANTHROPIC_API_KEY environment variable is not set');
     }
 
-    AnthropicClient.instance = new AnthropicClient(apiKey);
+    AnthropicClient.instance = new AnthropicClient(apiKey, config ?? {});
     return AnthropicClient.instance;
   }
 
   // ── complete ──────────────────────────────────────────────────────────────
 
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
-    const system: string | Anthropic.TextBlockParam[] =
-      request.cache_system_prompt
-        ? [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }]
-        : request.system;
-
     try {
-      const response = await this.sdk.messages.create({
-        model:      request.model,
-        system,
-        messages:   request.messages,
-        max_tokens: request.max_tokens,
-        temperature: request.temperature,
-      });
+      const response = await this.sdk.messages.create(
+        {
+          model:       request.model,
+          system:      systemParam(request),
+          messages:    request.messages,
+          max_tokens:  request.max_tokens,
+          temperature: request.temperature,
+        },
+        request.timeout_ms !== undefined ? { timeout: request.timeout_ms } : undefined,
+      );
 
       const block = response.content.find(b => b.type === 'text');
       if (!block || block.type !== 'text') {
@@ -98,15 +149,7 @@ export class AnthropicClient {
         stop_reason:   response.stop_reason,
       };
     } catch (err) {
-      if (err instanceof LLMError) throw err;
-      if (err instanceof Anthropic.APIError) {
-        throw new LLMError(
-          `Anthropic API error ${err.status}: ${err.message}`,
-          err,
-          err.status,
-        );
-      }
-      throw new LLMError('Unexpected error calling Anthropic API', err);
+      throw mapError(err, this.config.timeoutMs);
     }
   }
 
@@ -118,20 +161,61 @@ export class AnthropicClient {
     let parsed: unknown;
     try {
       parsed = JSON.parse(response.text);
-    } catch (err) {
+    } catch (parseError) {
       throw new LLMError(
         'API response was not valid JSON — ensure the prompt instructs the model to output raw JSON only',
-        { raw: response.text, parseError: err },
+        { response, parseError },
       );
     }
 
     return parsed as T;
   }
 
-  // ── test utility ──────────────────────────────────────────────────────────
-  // Clears the singleton so tests can inject a fresh client or env state.
+  // ── Test utility ──────────────────────────────────────────────────────────
+  // Clears the singleton between tests so each test starts with a clean slate.
 
   static _reset(): void {
     AnthropicClient.instance = null;
   }
+}
+
+// ── Module-level helpers ──────────────────────────────────────────────────────
+
+function systemParam(
+  req: CompletionRequest,
+): string | Anthropic.TextBlockParam[] {
+  if (!req.cache_system_prompt) return req.system;
+  return [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }];
+}
+
+function mapError(err: unknown, timeoutMs: number): LLMError {
+  if (err instanceof LLMError) return err;
+
+  if (err instanceof Anthropic.APIConnectionTimeoutError) {
+    return new LLMTimeoutError(`Request timed out after ${timeoutMs}ms`, err);
+  }
+
+  if (err instanceof Anthropic.AuthenticationError) {
+    return new LLMAuthError(
+      'Authentication failed — check ANTHROPIC_API_KEY',
+      err,
+    );
+  }
+
+  if (err instanceof Anthropic.RateLimitError) {
+    return new LLMRateLimitError(
+      `Rate limit exceeded — all retries exhausted: ${err.message}`,
+      err,
+    );
+  }
+
+  if (err instanceof Anthropic.APIError) {
+    return new LLMError(
+      `Anthropic API error ${err.status}: ${err.message}`,
+      err,
+      err.status,
+    );
+  }
+
+  return new LLMError('Unexpected error calling Anthropic API', err);
 }

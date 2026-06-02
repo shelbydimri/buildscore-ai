@@ -1,6 +1,6 @@
 import type { DefineAgentInput, DefineOutput } from '../types/agent-types';
 import { AnthropicClient, LLMError } from '../src/llm/anthropic-client';
-import { buildDefineAgentPrompt } from '../src/prompts/define-agent.prompt';
+import { buildDefinePrompt } from '../src/prompts/define-agent.prompt';
 
 export class DefineAgent {
   constructor() {}
@@ -10,14 +10,15 @@ export class DefineAgent {
   async execute(input: DefineAgentInput): Promise<DefineOutput> {
     this.validateInput(input);
 
-    const client = AnthropicClient.getInstance();
-    const output = await client.completeJSON<DefineOutput>(buildDefineAgentPrompt(input));
+    const output = await AnthropicClient
+      .getInstance()
+      .completeJSON<DefineOutput>(buildDefinePrompt(input));
 
     this.validateOutput(output);
     return output;
   }
 
-  // ── Input validation ───────────────────────────────────────────────────────
+  // ── Input ──────────────────────────────────────────────────────────────────
 
   private validateInput(input: DefineAgentInput): void {
     if (!input.idea || input.idea.trim() === '') {
@@ -25,11 +26,19 @@ export class DefineAgent {
     }
   }
 
-  // ── Output contract enforcement ────────────────────────────────────────────
+  // ── Output contract ────────────────────────────────────────────────────────
   // Throws LLMError on any contract violation.
-  // The orchestrator's callWithRetry will retry once, then halt the pipeline.
+  // callWithRetry in the orchestrator retries once, then halts the pipeline.
 
   private validateOutput(output: DefineOutput): void {
+    // Verify the model returned this agent's output and not another agent's.
+    if (output.agent !== 'define-problem') {
+      throw new LLMError(
+        `DefineAgent: wrong agent field — expected "define-problem", got "${String(output.agent)}"`,
+        output,
+      );
+    }
+
     if (output.analysis_status !== 'complete' && output.analysis_status !== 'insufficient_input') {
       throw new LLMError(
         `DefineAgent: unexpected analysis_status "${String(output.analysis_status)}"`,
@@ -44,9 +53,9 @@ export class DefineAgent {
       );
     }
 
-    // insufficient_input path — only critical_unknowns is required
+    // insufficient_input path: pipeline halts after this; only critical_unknowns is required.
     if (output.analysis_status === 'insufficient_input') {
-      if (!output.critical_unknowns?.length) {
+      if (!Array.isArray(output.critical_unknowns) || output.critical_unknowns.length === 0) {
         throw new LLMError(
           'DefineAgent: insufficient_input must include at least one critical_unknown',
           output,
@@ -55,25 +64,37 @@ export class DefineAgent {
       return;
     }
 
-    // complete path — full contract (agent-contracts.md §Define Agent success criteria)
-    if (!output.problem_statement?.trim()) {
-      throw new LLMError('DefineAgent: problem_statement is empty', output);
+    // complete path: enforce all success criteria from agent-contracts.md.
+    this.validateCompleteOutput(output);
+  }
+
+  private validateCompleteOutput(output: DefineOutput): void {
+    // Required non-empty strings — checked together to keep the list in one place.
+    const requiredStrings: Array<[string, unknown]> = [
+      ['neutral_restatement',         output.neutral_restatement],
+      ['initial_problem_statement',   output.initial_problem_statement],
+      ['problem_statement',           output.problem_statement],
+      ['why_now',                     output.why_now],
+      ['pain_profile.type_basis',     output.pain_profile?.type_basis],
+      ['pain_profile.emotional_cost', output.pain_profile?.emotional_cost],
+    ];
+
+    for (const [field, value] of requiredStrings) {
+      if (typeof value !== 'string' || !value.trim()) {
+        throw new LLMError(`DefineAgent: ${field} is empty or missing`, output);
+      }
     }
-    if (!output.pain_profile?.type_basis?.trim()) {
-      throw new LLMError('DefineAgent: pain_profile.type_basis is empty', output);
-    }
-    if (!output.pain_profile?.emotional_cost?.trim()) {
-      throw new LLMError('DefineAgent: pain_profile.emotional_cost is empty', output);
-    }
-    if (!output.why_now?.trim()) {
-      throw new LLMError('DefineAgent: why_now is empty', output);
-    }
+
+    // Numeric score in range.
     if (
       typeof output.problem_strength_score !== 'number' ||
       output.problem_strength_score < 0 ||
       output.problem_strength_score > 100
     ) {
-      throw new LLMError('DefineAgent: problem_strength_score must be 0–100', output);
+      throw new LLMError(
+        `DefineAgent: problem_strength_score must be 0–100, got "${String(output.problem_strength_score)}"`,
+        output,
+      );
     }
 
     this.validateBreakdown(output);
@@ -90,9 +111,12 @@ export class DefineAgent {
     ] as const;
 
     for (const dim of dims) {
-      if (!b[dim].basis.trim()) {
+      // Runtime guard: basis can be null/undefined if the model omits it,
+      // even though the TypeScript type says string.
+      const basis = b[dim]?.basis;
+      if (typeof basis !== 'string' || !basis.trim()) {
         throw new LLMError(
-          `DefineAgent: problem_strength_breakdown.${dim}.basis is empty`,
+          `DefineAgent: problem_strength_breakdown.${dim}.basis is empty or missing`,
           output,
         );
       }

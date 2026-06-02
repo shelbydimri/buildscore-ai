@@ -6,9 +6,6 @@ import type { ResearchAgentInput, MarketAnalysisOutput } from '../../types/agent
 
 const SKILLS = resolve(dirname(fileURLToPath(import.meta.url)), '../../.claude/skills');
 
-// The Research Agent runs two skills sequentially.
-// Each has its own system prompt and its own CompletionRequest builder.
-
 export const MARKET_ANALYSIS_SYSTEM_PROMPT = readFileSync(
   resolve(SKILLS, 'market-analysis/SKILL.md'),
   'utf-8',
@@ -25,29 +22,55 @@ export function buildMarketAnalysisPrompt(input: ResearchAgentInput): Completion
   return {
     model:               MODELS.SONNET,
     system:              MARKET_ANALYSIS_SYSTEM_PROMPT,
-    messages:            [{ role: 'user', content: JSON.stringify(input, null, 2) }],
+    messages:            [{ role: 'user', content: marketUserMessage(input) }],
     max_tokens:          8192,
     cache_system_prompt: true,
   };
 }
 
 // ── Skill 2: competitor-analysis ──────────────────────────────────────────────
-// Accepts the market_analysis_output from skill 1 so the competitor scope
-// is bounded by the beachhead segment and market definition already produced.
+// Passes market_analysis_output so competitor scope is bounded by the
+// beachhead segment and market definition already produced.
 
 export function buildCompetitorAnalysisPrompt(
   input: ResearchAgentInput,
   marketAnalysis?: MarketAnalysisOutput,
 ): CompletionRequest {
-  const userContent = marketAnalysis
-    ? JSON.stringify({ ...input, market_analysis_output: marketAnalysis }, null, 2)
-    : JSON.stringify(input, null, 2);
+  const payload = marketAnalysis
+    ? { ...input, market_analysis_output: marketAnalysis }
+    : input;
 
   return {
     model:               MODELS.SONNET,
     system:              COMPETITOR_ANALYSIS_SYSTEM_PROMPT,
-    messages:            [{ role: 'user', content: userContent }],
+    messages:            [{ role: 'user', content: competitorUserMessage(payload) }],
     max_tokens:          8192,
     cache_system_prompt: true,
   };
+}
+
+// ── User message builders ─────────────────────────────────────────────────────
+
+function marketUserMessage(input: ResearchAgentInput): string {
+  return [
+    'Analyze the inputs below.',
+    'Return a single raw JSON object — MarketAnalysisOutput with "agent": "market-analysis".',
+    'Return ONLY the JSON. No markdown. No code fences. No explanations.',
+    '',
+    '<input>',
+    JSON.stringify(input, null, 2),
+    '</input>',
+  ].join('\n');
+}
+
+function competitorUserMessage(payload: unknown): string {
+  return [
+    'Analyze the inputs below.',
+    'Return a single raw JSON object — CompetitorAnalysisOutput with "agent": "competitor-analysis".',
+    'Return ONLY the JSON. No markdown. No code fences. No explanations.',
+    '',
+    '<input>',
+    JSON.stringify(payload, null, 2),
+    '</input>',
+  ].join('\n');
 }

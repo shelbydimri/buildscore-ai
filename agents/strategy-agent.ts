@@ -3,7 +3,7 @@ import type { StrategyAgentInput, MvpPlanningOutput } from '../types/agent-types
 export class StrategyAgent {
   constructor() {}
 
-  execute(input: StrategyAgentInput): MvpPlanningOutput {
+  async execute(input: StrategyAgentInput): Promise<MvpPlanningOutput> {
     this.validate(input);
     throw new Error('Not Implemented');
   }

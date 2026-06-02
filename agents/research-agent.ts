@@ -12,7 +12,7 @@ export interface ResearchAgentOutput {
 export class ResearchAgent {
   constructor() {}
 
-  execute(input: ResearchAgentInput): ResearchAgentOutput {
+  async execute(input: ResearchAgentInput): Promise<ResearchAgentOutput> {
     this.validate(input);
     throw new Error('Not Implemented');
   }

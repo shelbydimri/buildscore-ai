@@ -52,7 +52,7 @@ export class Orchestrator {
 
   // ── Public entry point ─────────────────────────────────────────────────────
 
-  run(input: DefineAgentInput, runId?: string): OrchestratorOutput {
+  async run(input: DefineAgentInput, runId?: string): Promise<OrchestratorOutput> {
     const run: OrchestratorRun = {
       run_id:         runId ?? generateRunId(),
       founder_brief:  input.idea,
@@ -73,7 +73,7 @@ export class Orchestrator {
     const state = new PipelineStateManager();
 
     try {
-      return this.execute(run, state, input);
+      return await this.execute(run, state, input);
     } catch (signal) {
       if (signal instanceof HaltSignal) {
         run.halt_reason = signal.reason;
@@ -92,14 +92,14 @@ export class Orchestrator {
 
   // ── Pipeline execution ─────────────────────────────────────────────────────
 
-  private execute(
+  private async execute(
     run:   OrchestratorRun,
     state: PipelineStateManager,
     input: DefineAgentInput,
-  ): OrchestratorDecisionOutput {
+  ): Promise<OrchestratorDecisionOutput> {
 
     // ── Stage 1: Define ───────────────────────────────────────────────────────
-    const defineOutput = this.callWithRetry(
+    const defineOutput = await this.callWithRetry(
       () => this.defineAgent.execute(input),
       'define-agent',
     );
@@ -116,7 +116,7 @@ export class Orchestrator {
     }
 
     // ── Stage 2: Research (market-analysis + competitor-analysis) ─────────────
-    const researchOutput: ResearchAgentOutput = this.callWithRetry(
+    const researchOutput: ResearchAgentOutput = await this.callWithRetry(
       () => this.researchAgent.execute({
         define_output:  defineOutput,
         founder_brief:  input.idea,
@@ -147,7 +147,7 @@ export class Orchestrator {
       run.loop_count++;
 
       // Stage 3: Strategy (mvp-planning)
-      const strategyOutput = this.callWithRetry(
+      const strategyOutput = await this.callWithRetry(
         () => this.strategyAgent.execute({
           define_output:              defineOutput,
           market_analysis_output:     state.requireMarketAnalysisOutput(),
@@ -159,7 +159,7 @@ export class Orchestrator {
       state.setMvpPlanningOutput(strategyOutput);
 
       // Stage 4: Critic (verification)
-      verification = this.callWithRetry(
+      verification = await this.callWithRetry(
         () => this.criticAgent.execute({
           define_output:              defineOutput,
           market_analysis_output:     state.requireMarketAnalysisOutput(),
@@ -174,11 +174,11 @@ export class Orchestrator {
       run.pipeline_state = state.getSnapshot();
 
       run.loop_history.push({
-        loop_count:           run.loop_count,
-        verdict:              verification.verdict,
+        loop_count:            run.loop_count,
+        verdict:               verification.verdict,
         trustworthiness_score: verification.trustworthiness_score,
-        required_revisions:   verification.required_revisions,
-        completed_at:         new Date().toISOString(),
+        required_revisions:    verification.required_revisions,
+        completed_at:          new Date().toISOString(),
       });
 
       // Gate — Problem root: the problem definition itself is broken; looping cannot fix it
@@ -190,21 +190,15 @@ export class Orchestrator {
         );
       }
 
-      // approve → exit loop → proceed to CEO
-      if (verification.verdict === 'approve') break;
-
-      // reject → exit loop → proceed to CEO (trust gate will fail)
-      if (verification.verdict === 'reject') break;
+      if (verification.verdict === 'approve') break; // → CEO
+      if (verification.verdict === 'reject')  break; // → CEO (trust gate will fail)
 
       // revise → loop back to Strategy with required_revisions in hand
       priorVerification = verification;
     }
-    // If loop_count reaches MAX_LOOP_COUNT without approve/reject, Critic's own
-    // loop-limit logic (SKILL.md §Loop awareness) will have produced a verdict
-    // of approve+caveats or reject on the final pass — either way we proceed.
 
     // ── Stage 5: CEO (startup-validation) ────────────────────────────────────
-    const ceoOutput: StartupValidationOutput = this.callWithRetry(
+    const ceoOutput: StartupValidationOutput = await this.callWithRetry(
       () => this.ceoAgent.execute({
         define_output:              defineOutput,
         market_analysis_output:     state.requireMarketAnalysisOutput(),
@@ -215,8 +209,8 @@ export class Orchestrator {
       'ceo-agent',
     );
     state.setStartupValidationOutput(ceoOutput);
-    run.final_decision   = ceoOutput.decision;
-    run.pipeline_state   = state.getSnapshot();
+    run.final_decision  = ceoOutput.decision;
+    run.pipeline_state  = state.getSnapshot();
 
     return {
       run_id:              run.run_id,
@@ -233,15 +227,15 @@ export class Orchestrator {
   }
 
   // ── Retry wrapper ──────────────────────────────────────────────────────────
-  // Calls fn(). On any failure, retries once.
+  // Awaits fn(). On any failure, retries once.
   // If the retry also fails, throws HaltSignal so the pipeline stops cleanly.
 
-  private callWithRetry<T>(fn: () => T, agentName: AgentName): T {
+  private async callWithRetry<T>(fn: () => Promise<T>, agentName: AgentName): Promise<T> {
     try {
-      return fn();
+      return await fn();
     } catch {
       try {
-        return fn();
+        return await fn();
       } catch (secondError) {
         const reason: HaltReason = secondError instanceof MissingInputError
           ? 'missing_input'

@@ -3,7 +3,7 @@ import type { CriticAgentInput, VerificationOutput } from '../types/agent-types'
 export class CriticAgent {
   constructor() {}
 
-  execute(input: CriticAgentInput): VerificationOutput {
+  async execute(input: CriticAgentInput): Promise<VerificationOutput> {
     this.validate(input);
     throw new Error('Not Implemented');
   }

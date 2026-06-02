@@ -3,7 +3,7 @@ import type { CEOAgentInput, StartupValidationOutput } from '../types/agent-type
 export class CEOAgent {
   constructor() {}
 
-  execute(input: CEOAgentInput): StartupValidationOutput {
+  async execute(input: CEOAgentInput): Promise<StartupValidationOutput> {
     this.validate(input);
     throw new Error('Not Implemented');
   }

@@ -30,6 +30,7 @@
   "include": [
     "agents/**/*",
     "orchestrator/**/*",
+    "src/**/*",
     "types/**/*"
   ],
   "exclude": [

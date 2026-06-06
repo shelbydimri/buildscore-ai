@@ -19,6 +19,10 @@ import type {
   StartupValidationOutput,
 } from '../types/agent-types';
 
+// Memory integration types are defined in orchestrator-types.ts (MemoryReadContext,
+// MemoryWritePayload) but are not yet wired into the orchestrator. Defer until v1.1.
+// The run() method will read memory before Define and write memory after CEO in future.
+
 const MAX_LOOP_COUNT = 3;
 
 // ─── Internal halt signal ─────────────────────────────────────────────────────

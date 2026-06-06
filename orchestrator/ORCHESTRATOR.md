@@ -214,34 +214,26 @@ These hold for every run. They are the contract the orchestrator guarantees.
 7. **Every terminal output is traceable or explicitly halted.** A decision carries its evidence ledger; a halt carries what is needed to proceed.
 8. **The orchestrator never fabricates.** Missing or malformed agent output stops the run — it is never invented, averaged over, or hand-patched into the appearance of a real result.
 
-## 10. Memory Integration
+## 10. Memory Integration (Deferred to v1.1)
 
-Memory Read Phase
+Memory integration is not yet implemented. The types are defined in `orchestrator-types.ts` (`MemoryReadContext`, `MemoryWritePayload`) for future use, but the orchestrator does not call memory read/write functions.
 
-Before Define Agent:
+**Planned Memory Read Phase** (before Define Agent):
 
 Read:
-
 - founder-preferences.md
 - market-patterns.md
 - decision-history.md
 
-Purpose:
+Purpose: Provide historical context.
 
-Provide historical context.
-
-Memory Write Phase
-
-After CEO Agent:
+**Planned Memory Write Phase** (after CEO Agent):
 
 Store:
-
 - Final decision
 - Confidence
 - Key risks
 - Market learnings
 - Failed assumptions
 
-Purpose:
-
-Improve future analyses.
+Purpose: Improve future analyses.

@@ -144,6 +144,10 @@ export class Orchestrator {
     }
 
     // ── Stages 3 & 4: Strategy → Critic loop (max MAX_LOOP_COUNT passes) ──────
+    // The Critic Agent (via the verification skill) is responsible for loop-limit logic:
+    // On loop_count == 3, if trustworthiness_score is 55-74 and all remaining issues are minor,
+    // the Critic must upgrade verdict from "revise" to "approve" with ceo_caveats populated.
+    // This prevents an infinite loop and surfaces caveats to the CEO Agent.
     let priorVerification: VerificationOutput | undefined;
     let verification!: VerificationOutput;
 
@@ -197,7 +201,8 @@ export class Orchestrator {
       if (verification.verdict === 'approve') break; // → CEO
       if (verification.verdict === 'reject')  break; // → CEO (trust gate will fail)
 
-      // revise → loop back to Strategy with required_revisions in hand
+      // revise → loop back to Strategy. On loop_count == 3, the loop condition will fail
+      // and we exit to CEO Agent (the Critic should have already applied the loop-limit upgrade).
       priorVerification = verification;
     }
 

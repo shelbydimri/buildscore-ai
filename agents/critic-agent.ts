@@ -100,6 +100,26 @@ export class CriticAgent {
       );
     }
 
+    // Loop-limit logic: On loop_count == 3, verdict must not be "revise".
+    // The skill must upgrade revise → approve with ceo_caveats if only minor issues remain.
+    if (inputLoopCount === 3 && output.verdict === 'revise') {
+      throw new LLMError(
+        'CriticAgent: on loop_count == 3, verdict must be "approve" (with ceo_caveats) or "reject", not "revise" — no fourth loop allowed',
+        output,
+      );
+    }
+
+    // When loop_limit_reached is true, ceo_caveats must be populated with unresolved issues.
+    if (output.pipeline_recommendation.loop_limit_reached === true) {
+      const caveats = output.pipeline_recommendation.ceo_caveats;
+      if (!Array.isArray(caveats) || caveats.length === 0) {
+        throw new LLMError(
+          'CriticAgent: loop_limit_reached is true but ceo_caveats is empty — every unresolved issue must be listed',
+          output,
+        );
+      }
+    }
+
     // Every required_revision must have a non-empty, actionable resolution.
     if (Array.isArray(output.required_revisions)) {
       for (const rev of output.required_revisions) {

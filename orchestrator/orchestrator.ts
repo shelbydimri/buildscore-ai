@@ -103,10 +103,12 @@ export class Orchestrator {
   ): Promise<OrchestratorDecisionOutput> {
 
     // ── Stage 1: Define ───────────────────────────────────────────────────────
+    console.log(`[${new Date().toISOString()}] START: define-agent`);
     const defineOutput = await this.callWithRetry(
       () => this.defineAgent.execute(input),
       'define-agent',
     );
+    console.log(`[${new Date().toISOString()}] END: define-agent`);
     state.setDefineOutput(defineOutput);
     run.pipeline_state = state.getSnapshot();
 
@@ -120,6 +122,7 @@ export class Orchestrator {
     }
 
     // ── Stage 2: Research (market-analysis + competitor-analysis) ─────────────
+    console.log(`[${new Date().toISOString()}] START: research-agent (market-analysis + competitor-analysis)`);
     const researchOutput: ResearchAgentOutput = await this.callWithRetry(
       () => this.researchAgent.execute({
         define_output:  defineOutput,
@@ -127,6 +130,7 @@ export class Orchestrator {
       }),
       'research-agent',
     );
+    console.log(`[${new Date().toISOString()}] END: research-agent`);
     state.setMarketAnalysisOutput(researchOutput.market_analysis_output);
     state.setCompetitorAnalysisOutput(researchOutput.competitor_analysis_output);
     run.pipeline_state = state.getSnapshot();
@@ -155,6 +159,7 @@ export class Orchestrator {
       run.loop_count++;
 
       // Stage 3: Strategy (mvp-planning)
+      console.log(`[${new Date().toISOString()}] START: strategy-agent (loop ${run.loop_count})`);
       const strategyOutput = await this.callWithRetry(
         () => this.strategyAgent.execute({
           define_output:              defineOutput,
@@ -164,9 +169,11 @@ export class Orchestrator {
         }),
         'strategy-agent',
       );
+      console.log(`[${new Date().toISOString()}] END: strategy-agent (loop ${run.loop_count})`);
       state.setMvpPlanningOutput(strategyOutput);
 
       // Stage 4: Critic (verification)
+      console.log(`[${new Date().toISOString()}] START: critic-agent (loop ${run.loop_count})`);
       verification = await this.callWithRetry(
         () => this.criticAgent.execute({
           define_output:              defineOutput,
@@ -178,6 +185,7 @@ export class Orchestrator {
         }),
         'critic-agent',
       );
+      console.log(`[${new Date().toISOString()}] END: critic-agent (loop ${run.loop_count}, verdict: ${verification.verdict})`);
       state.setVerificationOutput(verification);
       run.pipeline_state = state.getSnapshot();
 
@@ -207,6 +215,7 @@ export class Orchestrator {
     }
 
     // ── Stage 5: CEO (startup-validation) ────────────────────────────────────
+    console.log(`[${new Date().toISOString()}] START: ceo-agent`);
     const ceoOutput: StartupValidationOutput = await this.callWithRetry(
       () => this.ceoAgent.execute({
         define_output:              defineOutput,
@@ -217,6 +226,7 @@ export class Orchestrator {
       }),
       'ceo-agent',
     );
+    console.log(`[${new Date().toISOString()}] END: ceo-agent (decision: ${ceoOutput.decision})`);
     state.setStartupValidationOutput(ceoOutput);
     run.final_decision  = ceoOutput.decision;
     run.pipeline_state  = state.getSnapshot();

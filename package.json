@@ -9,10 +9,12 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx --watch"
+    "dev": "tsx --watch",
+    "analyze": "tsx src/cli/run-analysis.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "dotenv": "^17.4.2",
     "zod": "^3.24.2"
   },
   "devDependencies": {

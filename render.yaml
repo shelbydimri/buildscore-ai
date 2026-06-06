@@ -1,19 +1,24 @@
 services:
+  # Backend API Server
   - type: web
-    name: buildscore-ai-backend
+    name: buildscore-ai-api
     env: node
     region: oregon
     plan: starter
     buildCommand: npm install
-    startCommand: npm run dev
+    startCommand: npm run start:api
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: 3000
       - key: ANTHROPIC_API_KEY
         sync: false
 
+  # Frontend Web Application
   - type: web
-    name: buildscore-ai-frontend
+    name: buildscore-ai-web
     env: node
     region: oregon
     plan: starter
@@ -22,8 +27,11 @@ services:
     startCommand: npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
-        value: https://buildscore-ai-backend.onrender.com
+        value: ''
       - key: BACKEND_URL
-        value: https://buildscore-ai-backend.onrender.com
+        fromService:
+          type: web
+          name: buildscore-ai-api
+          property: url
       - key: NODE_ENV
         value: production

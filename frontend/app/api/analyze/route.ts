@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000';
+const BACKEND_URL =
+  process.env.BACKEND_URL || 'http://localhost:3000';
 
 type AgentStage = 'define' | 'research' | 'strategy' | 'critic' | 'ceo';
 
@@ -27,113 +28,49 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create a custom readable stream that simulates progress events
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const encoder = new TextEncoder();
+    // Call backend API and stream response
+    const backendUrl = `${BACKEND_URL}/api/analyze`;
 
-        try {
-          // Emit stage: define
-          controller.enqueue(
-            encoder.encode(encodeSSE({ type: 'stage', stage: 'define' }))
-          );
-
-          // Call backend API to run analysis
-          // For now, we'll simulate the backend call
-          const analysisInput = {
-            idea,
-            target_user,
-            founder_context,
-            prior_research,
-          };
-
-          // Simulate backend processing with events
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          controller.enqueue(
-            encoder.encode(
-              encodeSSE({
-                type: 'data',
-                data: { define_agent: { confidence: 45, problem_statement: 'Validating...' } },
-              })
-            )
-          );
-
-          controller.enqueue(
-            encoder.encode(encodeSSE({ type: 'stage', stage: 'research' }))
-          );
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-          controller.enqueue(
-            encoder.encode(
-              encodeSSE({
-                type: 'data',
-                data: { research_agent: { summary: 'Market research in progress...' } },
-              })
-            )
-          );
-
-          controller.enqueue(
-            encoder.encode(encodeSSE({ type: 'stage', stage: 'strategy' }))
-          );
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          controller.enqueue(
-            encoder.encode(
-              encodeSSE({
-                type: 'data',
-                data: { strategy_agent: { recommendation: 'Strategy developing...' } },
-              })
-            )
-          );
-
-          controller.enqueue(
-            encoder.encode(encodeSSE({ type: 'stage', stage: 'critic' }))
-          );
-          await new Promise((resolve) => setTimeout(resolve, 1200));
-          controller.enqueue(
-            encoder.encode(
-              encodeSSE({
-                type: 'data',
-                data: { critic_agent: { risks: [] } },
-              })
-            )
-          );
-
-          controller.enqueue(
-            encoder.encode(encodeSSE({ type: 'stage', stage: 'ceo' }))
-          );
-          await new Promise((resolve) => setTimeout(resolve, 800));
-          controller.enqueue(
-            encoder.encode(
-              encodeSSE({
-                type: 'data',
-                data: { ceo_agent: { build_score: 72, recommendation: 'build' } },
-              })
-            )
-          );
-
-          controller.enqueue(
-            encoder.encode(encodeSSE({ type: 'complete' }))
-          );
-
-          controller.close();
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          controller.enqueue(
-            encoder.encode(encodeSSE({ type: 'error', error: errorMessage }))
-          );
-          controller.close();
-        }
+    const backendResponse = await fetch(backendUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        idea,
+        target_user,
+        founder_context,
+        prior_research,
+      }),
     });
 
-    return new NextResponse(stream, {
+    if (!backendResponse.ok) {
+      const error = await backendResponse.text();
+      return NextResponse.json(
+        { error: `Backend error: ${backendResponse.statusText}` },
+        { status: backendResponse.status }
+      );
+    }
+
+    if (!backendResponse.body) {
+      return NextResponse.json(
+        { error: 'No response body from backend' },
+        { status: 500 }
+      );
+    }
+
+    // Stream the response directly from backend to client
+    return new NextResponse(backendResponse.body, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
       },
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
+    console.error('API error:', errorMessage);
     return NextResponse.json(
       { error: errorMessage },
       { status: 500 }

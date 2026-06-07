@@ -17,18 +17,28 @@ function encodeSSE(event: StreamEvent): string {
 }
 
 export async function POST(request: NextRequest) {
+  const encoder = new TextEncoder();
+
   try {
     const body = await request.json();
     const { idea, target_user, founder_context, prior_research } = body;
 
     if (!idea) {
-      return NextResponse.json(
-        { error: 'Idea is required' },
-        { status: 400 }
+      return new NextResponse(
+        encodeSSE({ type: 'error', error: 'Idea is required' }) +
+        encodeSSE({ type: 'complete' }),
+        {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
       );
     }
 
-    // Call backend API and stream response
+    // Call backend API with extended timeout and keepalive
     const backendUrl = `${BACKEND_URL}/api/analyze`;
 
     const backendResponse = await fetch(backendUrl, {
@@ -42,25 +52,78 @@ export async function POST(request: NextRequest) {
         founder_context,
         prior_research,
       }),
+      signal: AbortSignal.timeout(420000), // 7 minutes timeout for full pipeline
     });
 
     if (!backendResponse.ok) {
-      const error = await backendResponse.text();
-      return NextResponse.json(
-        { error: `Backend error: ${backendResponse.statusText}` },
-        { status: backendResponse.status }
+      const errorText = await backendResponse.text();
+      return new NextResponse(
+        encodeSSE({
+          type: 'error',
+          error: `Backend error (${backendResponse.status}): ${backendResponse.statusText}. ${errorText}`,
+        }) + encodeSSE({ type: 'complete' }),
+        {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
       );
     }
 
     if (!backendResponse.body) {
-      return NextResponse.json(
-        { error: 'No response body from backend' },
-        { status: 500 }
+      return new NextResponse(
+        encodeSSE({ type: 'error', error: 'No response body from backend' }) +
+        encodeSSE({ type: 'complete' }),
+        {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
       );
     }
 
-    // Stream the response directly from backend to client
-    return new NextResponse(backendResponse.body, {
+    // Stream the response directly from backend to client with error handling
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          const reader = backendResponse.body!.getReader();
+          const decoder = new TextDecoder();
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            controller.enqueue(encoder.encode(chunk));
+          }
+
+          // Ensure stream ends properly
+          const finalChunk = decoder.decode();
+          if (finalChunk) {
+            controller.enqueue(encoder.encode(finalChunk));
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Stream error';
+          console.error('Stream error:', errorMessage);
+          controller.enqueue(
+            encoder.encode(
+              encodeSSE({ type: 'error', error: `Connection lost: ${errorMessage}` }) +
+              encodeSSE({ type: 'complete' })
+            )
+          );
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new NextResponse(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -71,9 +134,18 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
     console.error('API error:', errorMessage);
-    return NextResponse.json(
-      { error: errorMessage },
-      { status: 500 }
+
+    return new NextResponse(
+      encodeSSE({ type: 'error', error: errorMessage }) +
+      encodeSSE({ type: 'complete' }),
+      {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+        },
+      }
     );
   }
 }

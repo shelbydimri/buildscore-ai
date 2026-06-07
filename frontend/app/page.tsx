@@ -48,6 +48,7 @@ export default function Home() {
       const decoder = new TextDecoder();
       let buffer = '';
       let accumulatedResults: Record<string, any> = {};
+      let receivedCompleteEvent = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -63,6 +64,9 @@ export default function Home() {
           try {
             const event: StreamEvent = JSON.parse(line.slice(6));
 
+            // Log each event for debugging
+            console.log('[SSE Event]', event.type, event);
+
             if (event.type === 'stage') {
               setCurrentStage(event.stage || null);
             } else if (event.type === 'data') {
@@ -73,9 +77,11 @@ export default function Home() {
             } else if (event.type === 'error') {
               setError(event.error || 'Unknown error occurred');
               setIsLoading(false);
+              receivedCompleteEvent = true;
               return;
             } else if (event.type === 'complete') {
               setIsComplete(true);
+              receivedCompleteEvent = true;
             }
           } catch (e) {
             console.error('Failed to parse event:', line, e);
@@ -83,9 +89,17 @@ export default function Home() {
         }
       }
 
-      setIsLoading(false);
+      // If stream closed without complete event, it was unexpected
+      if (!receivedCompleteEvent) {
+        console.error('SSE stream closed without complete event');
+        setError('Connection lost during analysis. Please try again.');
+        setIsLoading(false);
+      } else {
+        setIsLoading(false);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Analysis failed';
+      console.error('Analysis error:', errorMessage);
       setError(errorMessage);
       setIsLoading(false);
     }

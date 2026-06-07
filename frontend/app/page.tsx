@@ -8,7 +8,7 @@ import { ResultsDisplay } from '@/components/ResultsDisplay';
 type AgentStage = 'define' | 'research' | 'strategy' | 'critic' | 'ceo';
 
 interface StreamEvent {
-  type: 'stage' | 'error' | 'complete' | 'data';
+  type: 'stage' | 'error' | 'complete' | 'data' | 'ping';
   stage?: AgentStage;
   message?: string;
   error?: string;

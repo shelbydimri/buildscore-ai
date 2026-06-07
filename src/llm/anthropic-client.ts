@@ -3,9 +3,9 @@ import Groq from 'groq-sdk';
 // ── Model IDs ─────────────────────────────────────────────────────────────────
 
 export const MODELS = {
-  OPUS:   'llama-3.3-70b-versatile',
-  SONNET: 'llama-3.3-70b-versatile',
-  HAIKU:  'llama-3.3-70b-versatile',
+  OPUS:   'llama-3.1-8b-instant',
+  SONNET: 'llama-3.1-8b-instant',
+  HAIKU:  'llama-3.1-8b-instant',
 } as const;
 
 export type ModelId = (typeof MODELS)[keyof typeof MODELS];

@@ -67,10 +67,11 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
       return;
     }
 
-    // Set up SSE response headers
+    // Set up SSE response headers for long-running streams
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Access-Control-Allow-Origin', '*');
 
     // Build input for Define Agent
@@ -181,9 +182,13 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Start server
-app.listen(PORT, () => {
+// Start server with no timeout for long-running agent pipelines
+const server = app.listen(PORT, () => {
   console.log(`BuildScore API server running on http://localhost:${PORT}`);
   console.log(`POST /api/analyze - Stream startup analysis`);
   console.log(`GET /health - Health check`);
 });
+
+// Disable timeouts for long-running SSE streams (3-6 minute agent analysis)
+server.timeout = 0;
+server.keepAliveTimeout = 0;

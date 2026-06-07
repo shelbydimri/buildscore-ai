@@ -14,7 +14,7 @@ export function buildDefinePrompt(input: DefineAgentInput): CompletionRequest {
     model:               MODELS.SONNET,
     system:              SYSTEM_PROMPT,
     messages:            [{ role: 'user', content: userMessage(input) }],
-    max_tokens:          8192,
+    max_tokens:          4096,
     cache_system_prompt: true,
   };
 }

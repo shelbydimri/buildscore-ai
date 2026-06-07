@@ -1,11 +1,11 @@
-import Anthropic from '@anthropic-ai/sdk';
+import Groq from 'groq-sdk';
 
 // ── Model IDs ─────────────────────────────────────────────────────────────────
 
 export const MODELS = {
-  OPUS:   'claude-opus-4-8',
-  SONNET: 'claude-sonnet-4-6',
-  HAIKU:  'claude-haiku-4-5-20251001',
+  OPUS:   'llama-3.3-70b-versatile',
+  SONNET: 'llama-3.3-70b-versatile',
+  HAIKU:  'llama-3.3-70b-versatile',
 } as const;
 
 export type ModelId = (typeof MODELS)[keyof typeof MODELS];
@@ -13,7 +13,7 @@ export type ModelId = (typeof MODELS)[keyof typeof MODELS];
 // ── Client configuration ──────────────────────────────────────────────────────
 
 export interface ClientConfig {
-  /** Retries on 429 / 529 / network errors via SDK exponential backoff. Default: 3. */
+  /** Retries on network errors via SDK exponential backoff. Default: 3. */
   maxRetries?: number;
   /** Global per-request timeout in milliseconds. Default: 120_000 (2 min). */
   timeoutMs?:  number;
@@ -27,15 +27,13 @@ const DEFAULT_TIMEOUT_MS  = 120_000;
 export interface CompletionRequest {
   model:                ModelId;
   system:               string;
-  messages:             Anthropic.MessageParam[];
+  messages:             Groq.Chat.ChatCompletionMessageParam[];
   max_tokens:           number;
   temperature?:         number;
   /** Overrides the global timeout for this specific request. */
   timeout_ms?:          number;
   /**
-   * Wraps the system prompt in an ephemeral cache_control block.
-   * Set true for large, stable prompts (skill definitions) to reduce
-   * latency and cost on repeated calls within the same cache TTL window.
+   * Cache control (kept for API compatibility, not used by Groq).
    */
   cache_system_prompt?: boolean;
 }
@@ -45,8 +43,7 @@ export interface CompletionResponse {
   model:         string;
   input_tokens:  number;
   output_tokens: number;
-  /** Precise SDK union — avoids stringly-typed comparisons at call sites. */
-  stop_reason:   Anthropic.Message['stop_reason'];
+  stop_reason:   string;
 }
 
 // ── Error hierarchy ───────────────────────────────────────────────────────────
@@ -62,7 +59,7 @@ export class LLMError extends Error {
   }
 }
 
-/** Thrown when ANTHROPIC_API_KEY is missing or the key is rejected (401). */
+/** Thrown when GROQ_API_KEY is missing or the key is rejected (401). */
 export class LLMAuthError extends LLMError {
   constructor(message: string, cause?: unknown) {
     super(message, cause, 401);
@@ -70,7 +67,7 @@ export class LLMAuthError extends LLMError {
   }
 }
 
-/** Thrown after the SDK exhausts all retries on 429 / 529 responses. */
+/** Thrown after the SDK exhausts all retries on rate limit responses. */
 export class LLMRateLimitError extends LLMError {
   constructor(message: string, cause?: unknown) {
     super(message, cause, 429);
@@ -90,7 +87,7 @@ export class LLMTimeoutError extends LLMError {
 
 export class AnthropicClient {
   private static instance: AnthropicClient | null = null;
-  private readonly sdk:    Anthropic;
+  private readonly sdk:    Groq;
   private readonly config: Required<ClientConfig>;
 
   private constructor(apiKey: string, config: ClientConfig) {
@@ -98,10 +95,10 @@ export class AnthropicClient {
       maxRetries: config.maxRetries ?? DEFAULT_MAX_RETRIES,
       timeoutMs:  config.timeoutMs  ?? DEFAULT_TIMEOUT_MS,
     };
-    this.sdk = new Anthropic({
+    this.sdk = new Groq({
       apiKey,
+      timeout: this.config.timeoutMs,
       maxRetries: this.config.maxRetries,
-      timeout:    this.config.timeoutMs,
     });
   }
 
@@ -112,9 +109,9 @@ export class AnthropicClient {
   static getInstance(config?: ClientConfig): AnthropicClient {
     if (AnthropicClient.instance) return AnthropicClient.instance;
 
-    const apiKey = process.env['ANTHROPIC_API_KEY'];
+    const apiKey = process.env['GROQ_API_KEY'];
     if (!apiKey) {
-      throw new LLMAuthError('ANTHROPIC_API_KEY environment variable is not set');
+      throw new LLMAuthError('GROQ_API_KEY environment variable is not set');
     }
 
     AnthropicClient.instance = new AnthropicClient(apiKey, config ?? {});
@@ -125,30 +122,33 @@ export class AnthropicClient {
 
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
     try {
-      const response = await this.sdk.messages.create(
-        {
-          model:       request.model,
-          system:      systemParam(request),
-          messages:    request.messages,
-          max_tokens:  request.max_tokens,
-          temperature: request.temperature,
-        },
-        request.timeout_ms !== undefined ? { timeout: request.timeout_ms } : undefined,
-      );
+      // Groq expects system as part of messages array, not separate parameter
+      const messages: Groq.Chat.ChatCompletionMessageParam[] = [
+        { role: 'system', content: request.system },
+        ...request.messages,
+      ];
 
-      const block = response.content.find(b => b.type === 'text');
-      if (!block || block.type !== 'text') {
-        throw new LLMError('API response contained no text block', response);
+      const response = await this.sdk.chat.completions.create({
+        model:       request.model,
+        messages:    messages,
+        max_tokens:  request.max_tokens,
+        temperature: request.temperature,
+      });
+
+      const choice = response.choices[0];
+      if (!choice || choice.message.role !== 'assistant' || !choice.message.content) {
+        throw new LLMError('API response contained no assistant message', response);
       }
 
       return {
-        text:          block.text,
+        text:          choice.message.content,
         model:         response.model,
-        input_tokens:  response.usage.input_tokens,
-        output_tokens: response.usage.output_tokens,
-        stop_reason:   response.stop_reason,
+        input_tokens:  response.usage.prompt_tokens,
+        output_tokens: response.usage.completion_tokens,
+        stop_reason:   choice.finish_reason || 'unknown',
       };
     } catch (err) {
+      console.error('[Groq] Error:', err instanceof Error ? err.message : err);
       throw mapError(err, this.config.timeoutMs);
     }
   }
@@ -181,41 +181,35 @@ export class AnthropicClient {
 
 // ── Module-level helpers ──────────────────────────────────────────────────────
 
-function systemParam(
-  req: CompletionRequest,
-): string | Anthropic.TextBlockParam[] {
-  if (!req.cache_system_prompt) return req.system;
-  return [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }];
-}
-
 function mapError(err: unknown, timeoutMs: number): LLMError {
   if (err instanceof LLMError) return err;
 
-  if (err instanceof Anthropic.APIConnectionTimeoutError) {
+  // Check for Groq-specific errors
+  if (err instanceof Groq.APIConnectionTimeoutError) {
     return new LLMTimeoutError(`Request timed out after ${timeoutMs}ms`, err);
   }
 
-  if (err instanceof Anthropic.AuthenticationError) {
+  if (err instanceof Groq.AuthenticationError) {
     return new LLMAuthError(
-      'Authentication failed — check ANTHROPIC_API_KEY',
+      'Authentication failed — check GROQ_API_KEY',
       err,
     );
   }
 
-  if (err instanceof Anthropic.RateLimitError) {
+  if (err instanceof Groq.RateLimitError) {
     return new LLMRateLimitError(
-      `Rate limit exceeded — all retries exhausted: ${err.message}`,
+      `Rate limit exceeded: ${err.message}`,
       err,
     );
   }
 
-  if (err instanceof Anthropic.APIError) {
+  if (err instanceof Groq.APIError) {
     return new LLMError(
-      `Anthropic API error ${err.status}: ${err.message}`,
+      `Groq API error ${err.status}: ${err.message}`,
       err,
       err.status,
     );
   }
 
-  return new LLMError('Unexpected error calling Anthropic API', err);
+  return new LLMError(`Groq API error: ${err instanceof Error ? err.message : String(err)}`, err);
 }

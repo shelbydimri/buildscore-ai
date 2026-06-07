@@ -5,7 +5,6 @@ export const metadata: Metadata = {
   title: 'BuildScore AI | Validate Your Startup Idea',
   description: 'AI-powered startup idea validation and analysis. Define, research, strategize, critique, and decide with confidence.',
   viewport: 'width=device-width, initial-scale=1',
-  charset: 'utf-8',
 };
 
 export default function RootLayout({

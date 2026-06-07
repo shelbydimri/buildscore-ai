@@ -133,7 +133,7 @@ export function ProgressPipeline({
               Analyzing with {STAGES.find((s) => s.id === currentStage)?.label} Agent
             </p>
             <p className="text-sm text-blue-700 mt-1">
-              This typically takes 3–6 minutes. Please wait...
+              This typically takes 8–10 minutes. Please wait...
             </p>
           </div>
         ) : null}

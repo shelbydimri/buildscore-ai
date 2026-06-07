@@ -347,7 +347,7 @@ services:
 | Strategy | 30–60s | MVP design |
 | Critic | 30–120s | Up to 3 verification loops |
 | CEO | 20–40s | Synthesizes all evidence |
-| **Total** | **3–6 minutes** | Depends on iteration count |
+| **Total** | **8–10 minutes** | Includes 60s TPM reset delays on Groq free tier |
 
 **Optimization:**
 - System prompt caching saves ~25% on Define latency

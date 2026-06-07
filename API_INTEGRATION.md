@@ -324,7 +324,7 @@ This allows:
 | Strategy Agent | 30–60s | May revise based on Critic |
 | Critic Agent | 30–120s | Loops up to 3 times |
 | CEO Agent | 20–40s | Synthesizes all inputs |
-| **Total** | **3–6 minutes** | Depends on looping |
+| **Total** | **8–10 minutes** | Includes 60s TPM reset delays on Groq free tier |
 
 **Optimization opportunities:**
 - Cache Define output for repeated ideas

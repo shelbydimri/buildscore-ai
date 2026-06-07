@@ -220,8 +220,8 @@ async function main(): Promise<void> {
   console.log();
   console.log(`  ${C.bold}${C.cyan}BUILDSCORE AI${C.reset}`);
   console.log(`  ${C.dim}Running full pipeline — Define → Research → Strategy → Critic → CEO${C.reset}`);
-  console.log(`  ${C.dim}This typically takes 3–6 minutes. API key: ${
-    process.env['ANTHROPIC_API_KEY'] ? 'found' : C.red + 'MISSING' + C.reset + C.dim
+  console.log(`  ${C.dim}This typically takes 8–10 minutes (includes TPM management). API key: ${
+    process.env['GROQ_API_KEY'] ? 'found' : C.red + 'MISSING' + C.reset + C.dim
   }${C.reset}`);
   console.log();
 

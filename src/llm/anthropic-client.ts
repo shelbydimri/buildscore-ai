@@ -3,9 +3,9 @@ import Groq from 'groq-sdk';
 // ── Model IDs ─────────────────────────────────────────────────────────────────
 
 export const MODELS = {
-  OPUS:   'llama-3.1-8b-instant',
-  SONNET: 'llama-3.1-8b-instant',
-  HAIKU:  'llama-3.1-8b-instant',
+  OPUS:   'llama-3.3-70b-versatile',
+  SONNET: 'llama-3.3-70b-versatile',
+  HAIKU:  'llama-3.3-70b-versatile',
 } as const;
 
 export type ModelId = (typeof MODELS)[keyof typeof MODELS];
@@ -150,11 +150,15 @@ export class AnthropicClient {
         }
 
         this.lastCallTime = Date.now();
+        const inputTokens = response.usage.prompt_tokens;
+        const outputTokens = response.usage.completion_tokens;
+        const totalTokens = inputTokens + outputTokens;
+        console.log(`[Groq Tokens] Input: ${inputTokens}, Output: ${outputTokens}, Total: ${totalTokens}`);
         return {
           text:          choice.message.content,
           model:         response.model,
-          input_tokens:  response.usage.prompt_tokens,
-          output_tokens: response.usage.completion_tokens,
+          input_tokens:  inputTokens,
+          output_tokens: outputTokens,
           stop_reason:   choice.finish_reason || 'unknown',
         };
       } catch (err) {

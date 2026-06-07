@@ -29,84 +29,83 @@ export default function Home() {
     setError(null);
     setIsComplete(false);
 
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3000';
+
     try {
-      const response = await fetch('/api/analyze', {
+      // Step 1: Start the job
+      console.log('[Browser] Submitting to:', `${backendUrl}/api/analyze`);
+      const startResponse = await fetch(`${backendUrl}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
       });
 
-      if (!response.ok) {
-        throw new Error(`API error: ${response.statusText}`);
+      if (!startResponse.ok) {
+        throw new Error(`Failed to start job: ${startResponse.statusText}`);
       }
 
-      if (!response.body) {
-        throw new Error('No response body');
-      }
+      const startData = (await startResponse.json()) as { jobId: string };
+      const jobId = startData.jobId;
+      console.log('[Browser] Job started:', jobId);
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
       let accumulatedResults: Record<string, any> = {};
-      let receivedCompleteEvent = false;
+      let lastCompletedStages: string[] = [];
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // Step 2: Poll for status every 6 seconds
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await fetch(`${backendUrl}/api/status/${jobId}`, {
+            method: 'GET',
+          });
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim() || !line.startsWith('data: ')) continue;
-
-          try {
-            const event: StreamEvent = JSON.parse(line.slice(6));
-
-            // Log each event for debugging (skip ping for brevity)
-            if (event.type !== 'ping') {
-              console.log('[SSE Event]', event.type, event);
-            }
-
-            // Ignore keepalive ping events
-            if (event.type === 'ping') {
-              continue;
-            }
-
-            if (event.type === 'stage') {
-              setCurrentStage(event.stage || null);
-            } else if (event.type === 'data') {
-              if (event.data) {
-                accumulatedResults = { ...accumulatedResults, ...event.data };
-                setResults(accumulatedResults);
-              }
-            } else if (event.type === 'error') {
-              setError(event.error || 'Unknown error occurred');
-              setIsLoading(false);
-              receivedCompleteEvent = true;
-              return;
-            } else if (event.type === 'complete') {
-              setIsComplete(true);
-              receivedCompleteEvent = true;
-            }
-          } catch (e) {
-            console.error('Failed to parse event:', line, e);
+          if (!statusResponse.ok) {
+            throw new Error(`Failed to get status: ${statusResponse.statusText}`);
           }
-        }
-      }
 
-      // If stream closed without complete event, it was unexpected
-      if (!receivedCompleteEvent) {
-        console.error('SSE stream closed without complete event');
-        setError('Connection lost during analysis. Please try again.');
-        setIsLoading(false);
-      } else {
-        setIsLoading(false);
-      }
+          const jobState = (await statusResponse.json()) as {
+            status: 'running' | 'complete' | 'error';
+            currentStage: AgentStage | null;
+            completedStages: AgentStage[];
+            results: Record<string, any>;
+            error: string | null;
+          };
+
+          console.log('[Browser] Poll result:', jobState.status, jobState.currentStage);
+
+          // Emit stage events for newly completed stages
+          for (const stage of jobState.completedStages) {
+            if (!lastCompletedStages.includes(stage)) {
+              console.log('[Browser] Stage completed:', stage);
+              setCurrentStage(stage);
+              lastCompletedStages.push(stage);
+            }
+          }
+
+          // Handle completion
+          if (jobState.status === 'complete') {
+            console.log('[Browser] Job complete');
+            accumulatedResults = { ...accumulatedResults, ...jobState.results };
+            setResults(accumulatedResults);
+            setIsComplete(true);
+            setIsLoading(false);
+            clearInterval(pollInterval);
+          } else if (jobState.status === 'error') {
+            console.log('[Browser] Job error:', jobState.error);
+            setError(jobState.error || 'Unknown error occurred');
+            setIsLoading(false);
+            clearInterval(pollInterval);
+          }
+        } catch (pollError) {
+          const errorMessage = pollError instanceof Error ? pollError.message : 'Poll failed';
+          console.error('[Browser] Polling error:', errorMessage);
+          setError(errorMessage);
+          setIsLoading(false);
+          clearInterval(pollInterval);
+        }
+      }, 6000); // Poll every 6 seconds
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Analysis failed';
-      console.error('Analysis error:', errorMessage);
+      console.error('[Browser] Analysis error:', errorMessage);
       setError(errorMessage);
       setIsLoading(false);
     }

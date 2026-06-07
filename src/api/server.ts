@@ -17,43 +17,91 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Type for SSE events
+// Types for job management
 type AgentStage = 'define' | 'research' | 'strategy' | 'critic' | 'ceo';
-type EventType = 'stage' | 'error' | 'complete' | 'data';
+type JobStatus = 'running' | 'complete' | 'error';
 
-interface SSEEvent {
-  type: EventType;
-  stage?: AgentStage;
-  error?: string;
-  data?: Record<string, any>;
+interface JobState {
+  jobId: string;
+  status: JobStatus;
+  currentStage: AgentStage | null;
+  completedStages: AgentStage[];
+  results: Record<string, any>;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
-// Helper to encode SSE events
-function encodeSSE(event: SSEEvent): string {
-  return `data: ${JSON.stringify(event)}\n\n`;
+// In-memory job storage
+const jobs = new Map<string, JobState>();
+
+// Helper to generate job ID
+function generateJobId(): string {
+  return `job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Helper to create initial job state
+function createJob(jobId: string): JobState {
+  const now = Date.now();
+  return {
+    jobId,
+    status: 'running',
+    currentStage: null,
+    completedStages: [],
+    results: {},
+    error: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+// Helper to update job stage
+function updateJobStage(jobId: string, stage: AgentStage): void {
+  const job = jobs.get(jobId);
+  if (job) {
+    job.currentStage = stage;
+    if (!job.completedStages.includes(stage)) {
+      job.completedStages.push(stage);
+    }
+    job.updatedAt = Date.now();
+  }
+}
+
+// Helper to complete job with results
+function completeJob(jobId: string, results: Record<string, any>): void {
+  const job = jobs.get(jobId);
+  if (job) {
+    job.status = 'complete';
+    job.results = results;
+    job.currentStage = 'ceo';
+    if (!job.completedStages.includes('ceo')) {
+      job.completedStages.push('ceo');
+    }
+    job.updatedAt = Date.now();
+  }
+}
+
+// Helper to error job
+function errorJob(jobId: string, error: string): void {
+  const job = jobs.get(jobId);
+  if (job) {
+    job.status = 'error';
+    job.error = error;
+    job.updatedAt = Date.now();
+  }
 }
 
 // Map agent names from console logs to stages
 function mapAgentNameToStage(agentName: string): AgentStage | null {
-  if (agentName.includes('define')) {
-    return 'define';
-  }
-  if (agentName.includes('research')) {
-    return 'research';
-  }
-  if (agentName.includes('strategy')) {
-    return 'strategy';
-  }
-  if (agentName.includes('critic')) {
-    return 'critic';
-  }
-  if (agentName.includes('ceo')) {
-    return 'ceo';
-  }
+  if (agentName.includes('define')) return 'define';
+  if (agentName.includes('research')) return 'research';
+  if (agentName.includes('strategy')) return 'strategy';
+  if (agentName.includes('critic')) return 'critic';
+  if (agentName.includes('ceo')) return 'ceo';
   return null;
 }
 
-// POST /api/analyze - Stream analysis with SSE
+// POST /api/analyze - Start async job
 app.post('/api/analyze', async (req: Request, res: Response) => {
   try {
     const body = req.body as Record<string, unknown>;
@@ -67,68 +115,64 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
       return;
     }
 
-    // Set up SSE response headers for long-running streams
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // Create job
+    const jobId = generateJobId();
+    const job = createJob(jobId);
+    jobs.set(jobId, job);
 
-    // Build input for Define Agent
-    const inputData: DefineAgentInput = { idea: idea.trim() };
-    if (typeof targetUser === 'string') {
-      inputData.target_user = targetUser.trim();
-    }
-    if (typeof founderContext === 'string') {
-      inputData.founder_context = founderContext.trim();
-    }
-    if (typeof priorResearch === 'string') {
-      inputData.prior_research = priorResearch.trim();
-    }
-    const input = inputData;
+    // Return job ID immediately
+    res.json({ jobId });
 
-    // Track which stages we've emitted events for
-    const emittedStages = new Set<AgentStage>();
-
-    // Intercept console.log to detect agent stage transitions
-    const originalLog = console.log;
-
-    console.log = function (...args: any[]) {
-      const message = args.join(' ');
-
-      // Detect START/END patterns: [ISO_TIMESTAMP] START: agent-name
-      const startMatch = message.match(/\] START: ([a-z-]+)/);
-      if (startMatch && startMatch[1]) {
-        const agentName = startMatch[1];
-        const stage = mapAgentNameToStage(agentName);
-        if (stage && !emittedStages.has(stage)) {
-          emittedStages.add(stage);
-          res.write(encodeSSE({ type: 'stage', stage }));
+    // Start pipeline in background (no await)
+    (async () => {
+      try {
+        // Build input for Define Agent
+        const inputData: DefineAgentInput = { idea: idea.trim() };
+        if (typeof targetUser === 'string') {
+          inputData.target_user = targetUser.trim();
         }
-      }
+        if (typeof founderContext === 'string') {
+          inputData.founder_context = founderContext.trim();
+        }
+        if (typeof priorResearch === 'string') {
+          inputData.prior_research = priorResearch.trim();
+        }
+        const input = inputData;
 
-      // Call original console.log for debugging (if needed, suppress in production)
-      originalLog.apply(console, args);
-    };
+        // Intercept console.log to detect agent stage transitions
+        const originalLog = console.log;
 
-    try {
-      // Run orchestrator
-      const orchestrator = new Orchestrator();
-      const result: OrchestratorOutput = await orchestrator.run(input);
+        console.log = function (...args: any[]) {
+          const message = args.join(' ');
 
-      // Restore original console.log
-      console.log = originalLog;
+          // Detect START pattern: [ISO_TIMESTAMP] START: agent-name
+          const startMatch = message.match(/\] START: ([a-z-]+)/);
+          if (startMatch && startMatch[1]) {
+            const agentName = startMatch[1];
+            const stage = mapAgentNameToStage(agentName);
+            if (stage) {
+              updateJobStage(jobId, stage);
+            }
+          }
 
-      // Emit data events based on result type
-      if (result.outcome === 'decision') {
-        const decision = result as OrchestratorDecisionOutput;
+          // Call original console.log for debugging
+          originalLog.apply(console, args);
+        };
 
-        // Emit full pipeline state with CEO decision
-        const pipelineStateData = (result as unknown as Record<string, unknown>).pipeline_state || {};
-        res.write(
-          encodeSSE({
-            type: 'data',
-            data: {
+        try {
+          // Run orchestrator
+          const orchestrator = new Orchestrator();
+          const result: OrchestratorOutput = await orchestrator.run(input);
+
+          // Restore original console.log
+          console.log = originalLog;
+
+          // Process results based on outcome
+          if (result.outcome === 'decision') {
+            const decision = result as OrchestratorDecisionOutput;
+            const pipelineStateData = (result as unknown as Record<string, unknown>).pipeline_state || {};
+
+            const resultData = {
               ...pipelineStateData,
               ceo_decision: {
                 decision: decision.decision,
@@ -138,39 +182,46 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
                 fastest_next_action: decision.fastest_next_action,
                 open_risks: decision.open_risks,
               },
-            },
-          })
-        );
-      } else if (result.outcome === 'halt') {
-        const halt = result as OrchestratorHaltOutput;
-        // Emit partial state
-        res.write(
-          encodeSSE({
-            type: 'data',
-            data: halt.partial_state,
-          })
-        );
+            };
 
-        // Emit error
-        res.write(
-          encodeSSE({
-            type: 'error',
-            error: `${halt.halt_reason}: ${halt.what_is_needed.join('. ')}`,
-          })
-        );
+            completeJob(jobId, resultData);
+          } else if (result.outcome === 'halt') {
+            const halt = result as OrchestratorHaltOutput;
+            errorJob(
+              jobId,
+              `${halt.halt_reason}: ${halt.what_is_needed.join('. ')}`
+            );
+          }
+        } catch (error) {
+          // Restore original console.log
+          console.log = originalLog;
+
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          errorJob(jobId, errorMessage);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        errorJob(jobId, errorMessage);
       }
+    })();
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: errorMessage });
+  }
+});
 
-      // Emit completion event
-      res.write(encodeSSE({ type: 'complete' }));
-      res.end();
-    } catch (error) {
-      // Restore original console.log
-      console.log = originalLog;
+// GET /api/status/:jobId - Get job status
+app.get('/api/status/:jobId', (req: Request, res: Response) => {
+  try {
+    const { jobId } = req.params;
 
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      res.write(encodeSSE({ type: 'error', error: errorMessage }));
-      res.end();
+    const job = jobs.get(jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Job not found' });
+      return;
     }
+
+    res.json(job);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({ error: errorMessage });
@@ -182,13 +233,14 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Start server with no timeout for long-running agent pipelines
+// Start server
 const server = app.listen(PORT, () => {
   console.log(`BuildScore API server running on http://localhost:${PORT}`);
-  console.log(`POST /api/analyze - Stream startup analysis`);
+  console.log(`POST /api/analyze - Start async job`);
+  console.log(`GET /api/status/:jobId - Get job status`);
   console.log(`GET /health - Health check`);
 });
 
-// Disable timeouts for long-running SSE streams (3-6 minute agent analysis)
+// Disable timeouts for long-running jobs
 server.timeout = 0;
 server.keepAliveTimeout = 0;

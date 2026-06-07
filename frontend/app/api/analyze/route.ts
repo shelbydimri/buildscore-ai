@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL =
-  process.env.BACKEND_URL || 'http://localhost:3000';
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000';
 
 type AgentStage = 'define' | 'research' | 'strategy' | 'critic' | 'ceo';
 
 interface StreamEvent {
-  type: 'stage' | 'error' | 'complete' | 'data' | 'ping';
+  type: 'stage' | 'error' | 'complete' | 'data';
   stage?: AgentStage;
   error?: string;
   data?: Record<string, any>;
@@ -38,10 +37,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Call backend API with extended timeout and keepalive
+    // Call backend /api/analyze to start job
     const backendUrl = `${BACKEND_URL}/api/analyze`;
-
-    const backendResponse = await fetch(backendUrl, {
+    const startResponse = await fetch(backendUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -52,15 +50,15 @@ export async function POST(request: NextRequest) {
         founder_context,
         prior_research,
       }),
-      signal: AbortSignal.timeout(420000), // 7 minutes timeout for full pipeline
+      signal: AbortSignal.timeout(10000), // 10s timeout to get jobId
     });
 
-    if (!backendResponse.ok) {
-      const errorText = await backendResponse.text();
+    if (!startResponse.ok) {
+      const errorText = await startResponse.text();
       return new NextResponse(
         encodeSSE({
           type: 'error',
-          error: `Backend error (${backendResponse.status}): ${backendResponse.statusText}. ${errorText}`,
+          error: `Failed to start job: ${startResponse.statusText}. ${errorText}`,
         }) + encodeSSE({ type: 'complete' }),
         {
           headers: {
@@ -73,57 +71,101 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!backendResponse.body) {
-      return new NextResponse(
-        encodeSSE({ type: 'error', error: 'No response body from backend' }) +
-        encodeSSE({ type: 'complete' }),
-        {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-          },
-        }
-      );
-    }
+    const startData = (await startResponse.json()) as { jobId: string };
+    const jobId = startData.jobId;
 
-    // Stream the response directly from backend to client with error handling and keepalive
+    // Stream polling results back to client
     const stream = new ReadableStream({
       async start(controller) {
-        // Keepalive ping every 20 seconds to prevent Render 30s timeout
-        const pingInterval = setInterval(() => {
-          controller.enqueue(encoder.encode(encodeSSE({ type: 'ping' })));
-        }, 20000);
+        let lastCompletedStages: string[] = [];
+        let isComplete = false;
+        let hasError = false;
 
         try {
-          const reader = backendResponse.body!.getReader();
-          const decoder = new TextDecoder();
+          // Poll every 5 seconds until complete
+          while (!isComplete && !hasError) {
+            // Wait 5 seconds before polling
+            await new Promise(resolve => setTimeout(resolve, 5000));
 
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+            // Get job status
+            const statusUrl = `${BACKEND_URL}/api/status/${jobId}`;
+            const statusResponse = await fetch(statusUrl, {
+              method: 'GET',
+              signal: AbortSignal.timeout(5000), // 5s timeout for status check
+            });
 
-            const chunk = decoder.decode(value, { stream: true });
-            controller.enqueue(encoder.encode(chunk));
-          }
+            if (!statusResponse.ok) {
+              const errorText = await statusResponse.text();
+              controller.enqueue(
+                encoder.encode(
+                  encodeSSE({
+                    type: 'error',
+                    error: `Failed to get job status: ${statusResponse.statusText}. ${errorText}`,
+                  }) + encodeSSE({ type: 'complete' })
+                )
+              );
+              hasError = true;
+              break;
+            }
 
-          // Ensure stream ends properly
-          const finalChunk = decoder.decode();
-          if (finalChunk) {
-            controller.enqueue(encoder.encode(finalChunk));
+            const jobState = (await statusResponse.json()) as {
+              status: 'running' | 'complete' | 'error';
+              currentStage: AgentStage | null;
+              completedStages: AgentStage[];
+              results: Record<string, any>;
+              error: string | null;
+            };
+
+            // Emit stage events for newly completed stages
+            for (const stage of jobState.completedStages) {
+              if (!lastCompletedStages.includes(stage)) {
+                controller.enqueue(
+                  encoder.encode(encodeSSE({ type: 'stage', stage }))
+                );
+                lastCompletedStages.push(stage);
+              }
+            }
+
+            // Check if job is complete
+            if (jobState.status === 'complete') {
+              // Emit final results
+              controller.enqueue(
+                encoder.encode(
+                  encodeSSE({
+                    type: 'data',
+                    data: jobState.results,
+                  })
+                )
+              );
+              controller.enqueue(
+                encoder.encode(encodeSSE({ type: 'complete' }))
+              );
+              isComplete = true;
+            } else if (jobState.status === 'error') {
+              // Emit error
+              controller.enqueue(
+                encoder.encode(
+                  encodeSSE({
+                    type: 'error',
+                    error: jobState.error || 'Unknown error',
+                  }) + encodeSSE({ type: 'complete' })
+                )
+              );
+              hasError = true;
+            }
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Stream error';
-          console.error('Stream error:', errorMessage);
+          console.error('Polling error:', errorMessage);
           controller.enqueue(
             encoder.encode(
-              encodeSSE({ type: 'error', error: `Connection lost: ${errorMessage}` }) +
-              encodeSSE({ type: 'complete' })
+              encodeSSE({
+                type: 'error',
+                error: `Polling error: ${errorMessage}`,
+              }) + encodeSSE({ type: 'complete' })
             )
           );
         } finally {
-          clearInterval(pingInterval);
           controller.close();
         }
       },

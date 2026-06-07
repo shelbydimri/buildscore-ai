@@ -21,6 +21,7 @@ export interface ClientConfig {
 
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_TIMEOUT_MS  = 120_000;
+const TPM_RESET_DELAY_MS  = 61_000; // 61 seconds to reset Groq's TPM window
 
 // ── Request / response types ──────────────────────────────────────────────────
 
@@ -89,6 +90,7 @@ export class AnthropicClient {
   private static instance: AnthropicClient | null = null;
   private readonly sdk:    Groq;
   private readonly config: Required<ClientConfig>;
+  private lastCallTime: number = 0;
 
   private constructor(apiKey: string, config: ClientConfig) {
     this.config = {
@@ -121,36 +123,58 @@ export class AnthropicClient {
   // ── complete ──────────────────────────────────────────────────────────────
 
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
-    try {
-      // Groq expects system as part of messages array, not separate parameter
-      const messages: Groq.Chat.ChatCompletionMessageParam[] = [
-        { role: 'system', content: request.system },
-        ...request.messages,
-      ];
+    // Wait until TPM window resets if needed (60+ seconds since last call)
+    await this.waitForTPMReset();
 
-      const response = await this.sdk.chat.completions.create({
-        model:       request.model,
-        messages:    messages,
-        max_tokens:  request.max_tokens,
-        temperature: request.temperature,
-      });
+    // Retry loop: first attempt + 2 retries on rate limit
+    for (let attempt = 0; attempt <= 2; attempt++) {
+      try {
+        // Groq expects system as part of messages array, not separate parameter
+        const messages: Groq.Chat.ChatCompletionMessageParam[] = [
+          { role: 'system', content: request.system },
+          ...request.messages,
+        ];
 
-      const choice = response.choices[0];
-      if (!choice || choice.message.role !== 'assistant' || !choice.message.content) {
-        throw new LLMError('API response contained no assistant message', response);
+        console.log(`[Groq] Attempt ${attempt + 1}: ${request.model} request with ${messages.reduce((sum, m) => sum + (m.content?.length || 0), 0)} total chars`);
+
+        const response = await this.sdk.chat.completions.create({
+          model:       request.model,
+          messages:    messages,
+          max_tokens:  request.max_tokens,
+          temperature: request.temperature,
+        });
+
+        const choice = response.choices[0];
+        if (!choice || choice.message.role !== 'assistant' || !choice.message.content) {
+          throw new LLMError('API response contained no assistant message', response);
+        }
+
+        this.lastCallTime = Date.now();
+        return {
+          text:          choice.message.content,
+          model:         response.model,
+          input_tokens:  response.usage.prompt_tokens,
+          output_tokens: response.usage.completion_tokens,
+          stop_reason:   choice.finish_reason || 'unknown',
+        };
+      } catch (err) {
+        const isRateLimit = isRateLimitError(err);
+
+        if (isRateLimit && attempt < 2) {
+          // Rate limit: wait 61 seconds and retry
+          console.warn(`[Groq] Rate limit hit on attempt ${attempt + 1}. Waiting 61s before retry...`);
+          await this.sleep(TPM_RESET_DELAY_MS);
+          continue;
+        }
+
+        // Last attempt failed or non-rate-limit error: throw
+        console.error('[Groq] Error:', err instanceof Error ? err.message : err);
+        throw mapError(err, this.config.timeoutMs);
       }
-
-      return {
-        text:          choice.message.content,
-        model:         response.model,
-        input_tokens:  response.usage.prompt_tokens,
-        output_tokens: response.usage.completion_tokens,
-        stop_reason:   choice.finish_reason || 'unknown',
-      };
-    } catch (err) {
-      console.error('[Groq] Error:', err instanceof Error ? err.message : err);
-      throw mapError(err, this.config.timeoutMs);
     }
+
+    // Should not reach here, but fail gracefully
+    throw new LLMError('Failed all completion attempts');
   }
 
   // ── completeJSON ──────────────────────────────────────────────────────────
@@ -171,6 +195,21 @@ export class AnthropicClient {
     return parsed as T;
   }
 
+  // ── Private helpers ────────────────────────────────────────────────────────
+
+  private async waitForTPMReset(): Promise<void> {
+    const timeSinceLastCall = Date.now() - this.lastCallTime;
+    if (timeSinceLastCall < TPM_RESET_DELAY_MS) {
+      const waitTime = TPM_RESET_DELAY_MS - timeSinceLastCall;
+      console.log(`[Groq] Waiting ${Math.ceil(waitTime / 1000)}s to reset TPM window...`);
+      await this.sleep(waitTime);
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   // ── Test utility ──────────────────────────────────────────────────────────
   // Clears the singleton between tests so each test starts with a clean slate.
 
@@ -180,6 +219,12 @@ export class AnthropicClient {
 }
 
 // ── Module-level helpers ──────────────────────────────────────────────────────
+
+function isRateLimitError(err: unknown): boolean {
+  if (err instanceof Groq.RateLimitError) return true;
+  if (err instanceof Groq.APIError && err.status === 413) return true;
+  return false;
+}
 
 function mapError(err: unknown, timeoutMs: number): LLMError {
   if (err instanceof LLMError) return err;

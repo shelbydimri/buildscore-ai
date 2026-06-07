@@ -64,8 +64,15 @@ export default function Home() {
           try {
             const event: StreamEvent = JSON.parse(line.slice(6));
 
-            // Log each event for debugging
-            console.log('[SSE Event]', event.type, event);
+            // Log each event for debugging (skip ping for brevity)
+            if (event.type !== 'ping') {
+              console.log('[SSE Event]', event.type, event);
+            }
+
+            // Ignore keepalive ping events
+            if (event.type === 'ping') {
+              continue;
+            }
 
             if (event.type === 'stage') {
               setCurrentStage(event.stage || null);

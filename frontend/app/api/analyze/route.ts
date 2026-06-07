@@ -6,7 +6,7 @@ const BACKEND_URL =
 type AgentStage = 'define' | 'research' | 'strategy' | 'critic' | 'ceo';
 
 interface StreamEvent {
-  type: 'stage' | 'error' | 'complete' | 'data';
+  type: 'stage' | 'error' | 'complete' | 'data' | 'ping';
   stage?: AgentStage;
   error?: string;
   data?: Record<string, any>;
@@ -88,9 +88,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Stream the response directly from backend to client with error handling
+    // Stream the response directly from backend to client with error handling and keepalive
     const stream = new ReadableStream({
       async start(controller) {
+        // Keepalive ping every 20 seconds to prevent Render 30s timeout
+        const pingInterval = setInterval(() => {
+          controller.enqueue(encoder.encode(encodeSSE({ type: 'ping' })));
+        }, 20000);
+
         try {
           const reader = backendResponse.body!.getReader();
           const decoder = new TextDecoder();
@@ -118,6 +123,7 @@ export async function POST(request: NextRequest) {
             )
           );
         } finally {
+          clearInterval(pingInterval);
           controller.close();
         }
       },

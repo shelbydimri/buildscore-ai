@@ -26,9 +26,7 @@ services:
     buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
-      - key: NEXT_PUBLIC_API_URL
-        value: ''
-      - key: BACKEND_URL
+      - key: NEXT_PUBLIC_BACKEND_URL
         fromService:
           type: web
           name: buildscore-ai-api

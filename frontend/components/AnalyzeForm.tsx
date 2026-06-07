@@ -160,7 +160,7 @@ export function AnalyzeForm({ onSubmit, isLoading }: AnalyzeFormProps) {
       </div>
 
       <p className="text-xs text-slate-500 text-center">
-        Analysis typically takes 3–6 minutes. We'll use advanced AI agents to validate your idea against market data, competitive landscape, and user demand signals.
+        Analysis typically takes 3–6 minutes. We&apos;ll use advanced AI agents to validate your idea against market data, competitive landscape, and user demand signals.
       </p>
     </form>
   );

@@ -14,6 +14,14 @@ export class StrategyAgent {
       .getInstance()
       .completeJSON<MvpPlanningOutput>(buildStrategyPrompt(input));
 
+    // On retry loop, force complete status if model returns insufficient_input
+    // The Critic sent required_revisions, so sufficient input exists to improve
+    if (input.required_revisions && input.required_revisions.length > 0) {
+      if (output.analysis_status === 'insufficient_input') {
+        output.analysis_status = 'complete';
+      }
+    }
+
     this.validateOutput(output);
     return output;
   }

@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import type { Request, Response } from 'express';
 import cors from 'cors';
+import { promises as fs } from 'fs';
+import * as path from 'path';
 import { Orchestrator } from '../../orchestrator/orchestrator';
 import type { DefineAgentInput } from '../../types/agent-types';
 import type {
@@ -13,10 +15,42 @@ import type {
 const app = express();
 const PORT = process.env.PORT || 3000;
 const TEST_MODE = process.env.TEST_MODE === 'true';
+const LOGS_DIR = path.join(process.cwd(), 'logs');
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Helper to ensure logs directory exists
+async function ensureLogsDirectory(): Promise<void> {
+  try {
+    await fs.mkdir(LOGS_DIR, { recursive: true });
+  } catch (err) {
+    console.error(`Failed to create logs directory: ${String(err)}`);
+  }
+}
+
+// Helper to save job result to file
+async function saveJobToFile(job: JobState): Promise<void> {
+  try {
+    await ensureLogsDirectory();
+    const filepath = path.join(LOGS_DIR, `job-${job.jobId}.json`);
+    await fs.writeFile(filepath, JSON.stringify(job, null, 2), 'utf-8');
+  } catch (err) {
+    console.error(`Failed to save job to file: ${String(err)}`);
+  }
+}
+
+// Helper to load job from file
+async function loadJobFromFile(jobId: string): Promise<JobState | null> {
+  try {
+    const filepath = path.join(LOGS_DIR, `job-${jobId}.json`);
+    const content = await fs.readFile(filepath, 'utf-8');
+    return JSON.parse(content) as JobState;
+  } catch (err) {
+    return null;
+  }
+}
 
 // Types for job management
 type AgentStage = 'define' | 'research' | 'strategy' | 'critic' | 'ceo';
@@ -69,7 +103,7 @@ function updateJobStage(jobId: string, stage: AgentStage): void {
 }
 
 // Helper to complete job with results
-function completeJob(jobId: string, results: Record<string, any>): void {
+async function completeJob(jobId: string, results: Record<string, any>): Promise<void> {
   const job = jobs.get(jobId);
   if (job) {
     job.status = 'complete';
@@ -79,16 +113,18 @@ function completeJob(jobId: string, results: Record<string, any>): void {
       job.completedStages.push('ceo');
     }
     job.updatedAt = Date.now();
+    await saveJobToFile(job);
   }
 }
 
 // Helper to error job
-function errorJob(jobId: string, error: string): void {
+async function errorJob(jobId: string, error: string): Promise<void> {
   const job = jobs.get(jobId);
   if (job) {
     job.status = 'error';
     job.error = error;
     job.updatedAt = Date.now();
+    await saveJobToFile(job);
   }
 }
 
@@ -162,7 +198,7 @@ async function runMockPipeline(jobId: string): Promise<void> {
     },
   };
 
-  completeJob(jobId, mockResults);
+  await completeJob(jobId, mockResults);
 }
 
 // POST /api/analyze - Start async job
@@ -253,24 +289,24 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
                 },
               };
 
-              completeJob(jobId, resultData);
+              await completeJob(jobId, resultData);
             } else if (result.outcome === 'halt') {
               const halt = result as OrchestratorHaltOutput;
               const errorMsg = `${halt.halt_reason}: ${halt.what_is_needed.join('. ')}`;
               console.error(`[${jobId}] Pipeline halted - ${errorMsg}`);
-              errorJob(jobId, errorMsg);
+              await errorJob(jobId, errorMsg);
             }
           } catch (error) {
             // Restore original console.log
             console.log = originalLog;
 
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            errorJob(jobId, errorMessage);
+            await errorJob(jobId, errorMessage);
           }
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        errorJob(jobId, errorMessage);
+        await errorJob(jobId, errorMessage);
       }
     })();
   } catch (error) {
@@ -280,11 +316,17 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
 });
 
 // GET /api/status/:jobId - Get job status
-app.get('/api/status/:jobId', (req: Request, res: Response) => {
+app.get('/api/status/:jobId', async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
 
-    const job = jobs.get(jobId);
+    let job = jobs.get(jobId);
+
+    // If not in memory, check logs directory (in case of spindown)
+    if (!job) {
+      job = await loadJobFromFile(jobId);
+    }
+
     if (!job) {
       res.status(404).json({ error: 'Job not found' });
       return;

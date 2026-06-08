@@ -5,6 +5,7 @@ import { StrategyAgent } from '../agents/strategy-agent';
 import { CriticAgent } from '../agents/critic-agent';
 import { CEOAgent } from '../agents/ceo-agent';
 import { PipelineStateManager, MissingInputError } from './pipeline-state';
+import { RunLogger } from '../src/logging/run-logger';
 import type {
   OrchestratorRun,
   OrchestratorOutput,
@@ -45,6 +46,7 @@ export class Orchestrator {
   private readonly strategyAgent: StrategyAgent;
   private readonly criticAgent:   CriticAgent;
   private readonly ceoAgent:      CEOAgent;
+  private readonly runLogger:     RunLogger;
 
   constructor() {
     this.defineAgent   = new DefineAgent();
@@ -52,6 +54,7 @@ export class Orchestrator {
     this.strategyAgent = new StrategyAgent();
     this.criticAgent   = new CriticAgent();
     this.ceoAgent      = new CEOAgent();
+    this.runLogger     = new RunLogger();
   }
 
   // ── Public entry point ─────────────────────────────────────────────────────
@@ -77,11 +80,13 @@ export class Orchestrator {
     const state = new PipelineStateManager();
 
     try {
-      return await this.execute(run, state, input);
+      const output = await this.execute(run, state, input);
+      await this.runLogger.saveRun(run.run_id, input, output);
+      return output;
     } catch (signal) {
       if (signal instanceof HaltSignal) {
         run.halt_reason = signal.reason;
-        return {
+        const output = {
           run_id:          run.run_id,
           outcome:         'halt',
           halt_reason:     signal.reason,
@@ -89,6 +94,8 @@ export class Orchestrator {
           what_is_needed:  signal.whatIsNeeded,
           partial_state:   state.getSnapshot(),
         } as OrchestratorHaltOutput;
+        await this.runLogger.saveRun(run.run_id, input, output);
+        return output;
       }
       throw signal; // unexpected — re-throw
     }

@@ -19,6 +19,18 @@ export class CEOAgent {
       .getInstance()
       .completeJSON<StartupValidationOutput>(buildCEOPrompt(input));
 
+    // Recalculate weighted_composite from dimension_scores to ensure mathematical accuracy
+    // Don't trust the model's arithmetic; calculate it ourselves
+    if (Array.isArray(output.dimension_scores)) {
+      const recalculated = output.dimension_scores.reduce(
+        (sum, d) => sum + (typeof d.score_0_10 === 'number' && typeof d.weight === 'number'
+          ? d.score_0_10 * d.weight
+          : 0),
+        0,
+      );
+      output.weighted_composite = Math.round(recalculated * 10) / 10;
+    }
+
     this.validateOutput(output, input);
     return output;
   }

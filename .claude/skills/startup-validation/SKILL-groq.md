@@ -37,6 +37,8 @@ Synthesize all upstream agents (Define, Research, Competitor, MVP Planning, Veri
    - Monetization (15% weight): From willingness_to_pay evidence tier: behavioral=8–10, stated=5–7, analogous=4–6, none=0–3.
    - MVP Feasibility (10% weight): From mvp_planning.feasibility_score ÷ 10. If assumption_inversion=true, cap at 4.
    - Execution Complexity (10% weight): Inverse score. Low complexity = high score.
+   
+   **🚨 CRITICAL: Every dimension_score MUST have ledger_refs as a non-empty array.** Example: `ledger_refs: ['market_attractiveness_score', 'confidence']`. Never leave ledger_refs as empty array `[]`. Each dimension MUST cite at least one evidence_ledger entry by ID.
 
 4. **Calculate Weighted Composite:** Σ (score × weight). Result: 0.0–10.0.
 

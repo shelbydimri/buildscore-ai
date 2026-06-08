@@ -24,6 +24,7 @@ Map the competitive landscape around the defined problem and identify exploitabl
 10. **Classify Claims:** Every claim → competitive_claims with classification: sourced / observed / inferred.
 
 **Critical rules:**
+- **REQUIRED: competitors[] MUST include at least one entry with type: 'workaround'** (e.g., spreadsheets, manual processes, existing habits, hiring freelancers, doing nothing). This is non-negotiable. Contract violation if absent.
 - No competitor means incomplete analysis. Document workarounds at minimum.
 - Weakness without user evidence = fabricated. Flag and remove.
 - Generic opportunities ("better UX") invalid without specific user complaint source.
@@ -167,10 +168,11 @@ Sum all = `landscape_score`.
 
 ## Critical Failure Modes
 
-1. **No Competitors:** Empty competitors[] = incomplete. Must document at least workarounds. `halt`
-2. **Weakness Without Evidence:** `evidence_source: "inferred"` or `"competitor_marketing"` for weaknesses = fabricated. Remove. `cap_confidence` at 55
-3. **Generic Opportunities:** "Better UX" without specific complaint source = invalid. Require source_complaints reference.
-4. **Tactical-as-Structural:** Classified structural without explaining why incumbent cannot fix. `flag_only`
-5. **Untraced Opportunities:** `source_complaints` empty = not evidence-grounded. Invalid.
-6. **Incumbent Response Unknown:** Direct competitors without capability/incentive assessment = incomplete. `flag_only`
-7. **Complaints Inferred Only:** All `user_complaints[].source_type: "inferred"` = fabricated. `cap_confidence` at 45
+1. **No Workaround Entry:** competitors[] does not include at least one entry with type='workaround' = **CONTRACT VIOLATION**. `halt` Must include: spreadsheets, manual processes, hiring freelancers, existing habits, or "do nothing" behaviors.
+2. **No Competitors:** Empty competitors[] = incomplete. Must document at least workarounds. `halt`
+3. **Weakness Without Evidence:** `evidence_source: "inferred"` or `"competitor_marketing"` for weaknesses = fabricated. Remove. `cap_confidence` at 55
+4. **Generic Opportunities:** "Better UX" without specific complaint source = invalid. Require source_complaints reference.
+5. **Tactical-as-Structural:** Classified structural without explaining why incumbent cannot fix. `flag_only`
+6. **Untraced Opportunities:** `source_complaints` empty = not evidence-grounded. Invalid.
+7. **Incumbent Response Unknown:** Direct competitors without capability/incentive assessment = incomplete. `flag_only`
+8. **Complaints Inferred Only:** All `user_complaints[].source_type: "inferred"` = fabricated. `cap_confidence` at 45

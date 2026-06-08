@@ -30,6 +30,9 @@ export class ResearchAgent {
     );
     this.validateMarketOutput(marketOutput);
 
+    // Wait 65 seconds to allow TPM limit to reset before next call
+    await new Promise(resolve => setTimeout(resolve, 65000));
+
     // Skill 2: competitor-analysis
     // Passes marketOutput so the competitor scope is bounded by the beachhead
     // segment and market definition already produced. If marketOutput is

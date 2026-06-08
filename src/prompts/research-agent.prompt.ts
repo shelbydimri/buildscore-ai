@@ -6,6 +6,11 @@ import type { ResearchAgentInput, MarketAnalysisOutput } from '../../types/agent
 
 const SKILLS = resolve(dirname(fileURLToPath(import.meta.url)), '../../.claude/skills');
 
+function extractFounderContext(brief: string | undefined): string {
+  if (!brief) return '';
+  return brief.slice(0, 1200).trim();
+}
+
 export const MARKET_ANALYSIS_SYSTEM_PROMPT = readFileSync(
   resolve(SKILLS, 'market-analysis/SKILL.md'),
   'utf-8',
@@ -59,7 +64,7 @@ function marketUserMessage(input: ResearchAgentInput): string {
   } : null;
 
   const minimalInput = {
-    founder_brief: input.founder_brief,
+    founder_brief: extractFounderContext(input.founder_brief),
     define_output: essentialDefineOutput,
   };
 
@@ -75,14 +80,21 @@ function marketUserMessage(input: ResearchAgentInput): string {
 }
 
 function competitorUserMessage(payload: any): string {
-  // Extract only essential fields from market analysis to reduce token count
+  // Extract only problem statement and current solutions to define competitive scope
+  const essentialDefine = payload.define_output ? {
+    problem_statement: payload.define_output.problem_statement,
+    current_solutions: (payload.define_output.status_quo?.current_solutions || []).slice(0, 3),
+  } : null;
+
+  // Only pass the market definition (one sentence describing the market)
+  const essentialMarket = payload.market_analysis_output ? {
+    market_definition: payload.market_analysis_output.market_definition,
+  } : null;
+
   const minimalPayload = {
-    founder_brief: payload.founder_brief,
-    market_analysis_output: payload.market_analysis_output ? {
-      beachhead_segment: payload.market_analysis_output.beachhead_segment,
-      market_definition: payload.market_analysis_output.market_definition,
-      tam_estimate_usd: payload.market_analysis_output.tam_estimate_usd,
-    } : null,
+    founder_brief: extractFounderContext(payload.founder_brief),
+    define_output: essentialDefine,
+    market_analysis_output: essentialMarket,
   };
 
   return [

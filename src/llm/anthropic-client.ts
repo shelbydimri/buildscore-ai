@@ -3,9 +3,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // ── Model IDs ─────────────────────────────────────────────────────────────────
 
 export const MODELS = {
-  OPUS:   'gemini-2.5-flash',
-  SONNET: 'gemini-2.5-flash',
-  HAIKU:  'gemini-2.5-flash',
+  OPUS:   'gemini-2.5-flash-lite',
+  SONNET: 'gemini-2.5-flash-lite',
+  HAIKU:  'gemini-2.5-flash-lite',
 } as const;
 
 export type ModelId = (typeof MODELS)[keyof typeof MODELS];

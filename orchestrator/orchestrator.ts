@@ -197,8 +197,11 @@ export class Orchestrator {
         completed_at:          new Date().toISOString(),
       });
 
-      // Gate — Problem root: the problem definition itself is broken; looping cannot fix it
-      if (verification.pipeline_recommendation.action === 'return_to_define') {
+      // Route by pipeline_recommendation.action (canonical signal for next step)
+      const action = verification.pipeline_recommendation.action;
+
+      if (action === 'return_to_define') {
+        // Gate — Problem root: the problem definition itself is broken; looping cannot fix it
         throw new HaltSignal(
           'return_to_define',
           'critic-agent',
@@ -206,12 +209,24 @@ export class Orchestrator {
         );
       }
 
-      if (verification.verdict === 'approve') break; // → CEO
-      if (verification.verdict === 'reject')  break; // → CEO (trust gate will fail)
+      if (action === 'proceed_to_ceo') {
+        // Exit to CEO (both 'approve' and 'reject' verdicts route here)
+        break;
+      }
 
-      // revise → loop back to Strategy. On loop_count == 3, the loop condition will fail
-      // and we exit to CEO Agent (the Critic should have already applied the loop-limit upgrade).
-      priorVerification = verification;
+      if (action === 'return_to_strategy') {
+        // Loop back to Strategy. On loop_count == 3, the loop condition will fail
+        // and we exit to CEO Agent (the Critic should have already applied the loop-limit upgrade).
+        priorVerification = verification;
+        continue;
+      }
+
+      // Unexpected action — should never happen if critic agent is correct
+      throw new HaltSignal(
+        'contract_violation',
+        'critic-agent',
+        [`Unexpected pipeline_recommendation.action: "${String(action)}"`],
+      );
     }
 
     // ── Stage 5: CEO (startup-validation) ────────────────────────────────────

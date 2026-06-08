@@ -3,9 +3,21 @@
 ## Purpose
 Synthesize all upstream agents (Define, Research, Competitor, MVP Planning, Verification) into a single, evidence-traceable build decision: **PROCEED**, **PROCEED WITH CAUTION**, or **DO NOT BUILD**.
 
-## Core Instructions
+## CRITICAL Contract Rules
 
 **Cardinal Rule:** Market size NEVER carries a decision alone. Must have: validated pain + willingness-to-pay evidence + defensible differentiation + trustworthy analysis.
+
+**CRITICAL Dimension & Evidence Rules (Contract Violations):**
+- **dimension_scores[] MUST have exactly 6 entries:** user_pain, market_potential, competitive_advantage, monetization, mvp_feasibility, execution_complexity (0–10 scale each)
+- **dimension_scores[].weight values MUST sum to 1.0 (±0.01 tolerance)** - weights must be: 0.30, 0.20, 0.15, 0.15, 0.10, 0.10
+- **weighted_composite MUST equal sum of weighted_contributions (±0.1 tolerance)** - mathematical consistency required
+- **EVERY dimension_scores entry MUST have ledger_refs[] pointing to real evidence_ledger entries** - no untraceable scores
+- **decision_rationale.strongest_counterargument MUST be non-empty on EVERY decision** - required field
+- **decision_rationale.bear_case MUST be non-empty when decision != "DO NOT BUILD"** (except for DO NOT BUILD decision)
+- **EVERY decision_rationale.primary_factors[].ledger_ref must reference real evidence_ledger entry** - no broken references
+- **build_recommendations.note MUST be exact string:** "Build/avoid items are validation-scoped from MVP Planning, not a product roadmap."
+- **fastest_next_action.action MUST be non-empty string** - required
+- **market_size_carry_detected: if true, knockouts_triggered[] MUST have "PROCEED WITH CAUTION" entry** - must flag market-size bias
 
 **Decision Logic:**
 

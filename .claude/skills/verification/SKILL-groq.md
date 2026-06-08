@@ -32,7 +32,17 @@ Determine whether upstream agents (Define, Research, Strategy, MVP Planning) pro
 
 10. **Apply Loop Limit:** If loop_count == 3 and issues remain, approve with explicit caveats rather than halting forever.
 
-**Critical rules:**
+**CRITICAL Contract Rules (Contract Violations if violated):**
+- **When verdict is "approve", blocking_issues MUST be empty** (non-empty blocking_issues with approve = contract violation)
+- **When loop_count == 3, verdict MUST NOT be "revise"** (must be approve with ceo_caveats or reject; no fourth loop)
+- **When loop_limit_reached is true, ceo_caveats[] MUST be non-empty** (must list all unresolved issues)
+- **required_revisions[] entries MUST each have non-empty, actionable resolution string**
+- **prior_issues_resolved[] MUST be non-empty when loop_count > 1** (must track which prior issues were resolved)
+- **trustworthiness_breakdown dimensions MUST all have non-empty basis strings**
+- **trustworthiness_breakdown scores must sum to trustworthiness_score (±1 tolerance)**
+- **evidence_quality.hallucinated_count must be consistent with hallucinated_claims array**
+
+**Other Critical Rules:**
 - **Hallucination = unsourced number or claim.** Every $ figure and material claim must have named source, stated methodology, or explicit "estimated" label.
 - **Weakness without evidence = fabricated.** Never accept `evidence_source: "inferred"` or `"competitor_marketing"` for competitive weaknesses.
 - **Assumption laundering = assumed without validation becomes fact.** Track all assumptions through all agents.

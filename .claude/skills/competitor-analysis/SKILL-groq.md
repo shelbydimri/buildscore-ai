@@ -25,6 +25,8 @@ Map the competitive landscape around the defined problem and identify exploitabl
 
 **Critical rules:**
 - **REQUIRED: competitors[] MUST include at least one entry with type: 'workaround'** (e.g., spreadsheets, manual processes, existing habits, hiring freelancers, doing nothing). This is non-negotiable. Contract violation if absent.
+- **REQUIRED: differentiation_opportunities[].defensibility_basis MUST be non-empty string (why incumbent cannot copy without breaking business)**
+- **REQUIRED: differentiation_opportunities[].source_complaints[] MUST be non-empty array (traceable to specific user_complaints entries)**
 - No competitor means incomplete analysis. Document workarounds at minimum.
 - Weakness without user evidence = fabricated. Flag and remove.
 - Generic opportunities ("better UX") invalid without specific user complaint source.

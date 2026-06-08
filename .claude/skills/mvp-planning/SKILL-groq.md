@@ -33,7 +33,18 @@ Design the smallest, cheapest validation experiment that tests the core assumpti
 
 10. **Score MVP Feasibility:** Sum five dimensions (assumption_clarity, experiment_design, success_criteria_quality, time_to_learning, validation_risk_management). Must = 0–100.
 
-**Critical rules:**
+**CRITICAL Contract Rules (Contract Violations if violated):**
+- **core_assumption.source_in_define_output MUST be non-empty string** (must reference upstream field)
+- **assumption_stack MUST have exactly 1 entry with is_core_target: true**
+- **experiment.time_bound_days MUST be > 0** (0 is a contract violation; must be positive integer)
+- **scope.out_of_scope MUST be non-empty array** (must pressure-test boundaries)
+- **success_criteria[] ALL entries MUST have is_behavioral: true** (attitudinal criteria are contract violations)
+- **success_criteria[] ALL entries MUST have is_pre_committed: true** (must be committed before experiment runs)
+- **validation_risks[] MUST include at least one false_positive entry** (required)
+- **validation_risks[] MUST include at least one false_negative entry** (required)
+- **mvp_feasibility_breakdown dimensions MUST all have non-empty basis strings**
+
+**Other Critical Rules:**
 - Core assumption must be single, specific, falsifiable, from Define output's lowest unvalidated layer.
 - Functional MVP only after Layers 1–3 are validated.
 - Success criteria must be behavioral and pre-committed.

@@ -24,6 +24,8 @@ Determine if a meaningful market exists for the problem defined by the Define Ag
 
 **Critical rules:**
 - Every field in `market_attractiveness_breakdown` MUST have non-empty `basis` string.
+- **willingness_to_pay[] entries: EACH entry MUST have evidence_tier field (behavioral|stated|analogous|none)**
+- **market_claims[] entries: EACH entry MUST have classification field (sourced|estimated|assumed)**
 - No hallucinated market sizes. Every dollar figure must have methodology + named source.
 - Demand signals: synthetic only = weak signal. Real behavioral evidence required for high confidence.
 - Willingness to pay: `evidence_tier: "none"` is valid but must not fabricate prices.

@@ -11,6 +11,11 @@ Design the smallest, cheapest validation experiment that tests the core assumpti
 - `pain_profile.type` is `"vitamin"`: flag—vitamins need stronger validation
 - `market_analysis_output` absent: cap confidence at 65
 
+**CRITICAL: Loop Retry Behavior**
+- When `critic_feedback` or `required_revisions` is present in input: MUST produce `analysis_status: complete`
+- Never return `insufficient_input` on a retry loop — the Critic sent revisions, meaning you have enough input to improve the prior output
+- Reintegrate feedback, revise the strategy, and always emit a complete analysis
+
 **Process (execute in order):**
 
 1. **Extract Assumption Stack:** Map each assumption from Define output to layer: Layer 1 (Value) → Layer 2 (Demand) → Layer 3 (Willingness to Pay) → Layer 4 (Retention) → Layer 5 (Solution). Identify lowest unvalidated layer as `core_assumption`.

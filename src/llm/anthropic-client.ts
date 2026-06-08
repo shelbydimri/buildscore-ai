@@ -192,7 +192,12 @@ export class AnthropicClient {
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(response.text);
+      // Strip markdown code fences that Gemini sometimes wraps around JSON
+      const cleaned = response.text
+        .replace(/```json\n?/g, '')
+        .replace(/```\n?/g, '')
+        .trim();
+      parsed = JSON.parse(cleaned);
     } catch (parseError) {
       throw new LLMError(
         'API response was not valid JSON — ensure the prompt instructs the model to output raw JSON only',

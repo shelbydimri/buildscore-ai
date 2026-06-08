@@ -1,193 +1,161 @@
 'use client';
 
+import { useState } from 'react';
+
 interface ResultsDisplayProps {
   results: Record<string, any> | null;
   isLoading: boolean;
 }
 
 export function ResultsDisplay({ results, isLoading }: ResultsDisplayProps) {
+  const [showRawJson, setShowRawJson] = useState(false);
+
   if (isLoading || !results) {
     return null;
   }
 
-  const buildScore = results?.ceo_agent?.build_score || null;
-  const decision = results?.ceo_agent?.recommendation || null;
-  const confidence = results?.define_agent?.confidence || 0;
-  const risks = results?.critic_agent?.risks || [];
-  const nextSteps = results?.ceo_agent?.recommended_next_steps || [];
+  // Extract CEO decision from results
+  const ceoDecision = results.ceo_decision || results.startup_validation_output || {};
+  const decision = ceoDecision.decision || 'UNKNOWN';
+  const confidence = ceoDecision.decision_confidence || 0;
+  const rationale = ceoDecision.decision_rationale || {};
+  const risks = ceoDecision.open_risks || [];
+  const nextAction = ceoDecision.fastest_next_action || {};
+  const primaryFactors = rationale.primary_factors || [];
+  const counterargument = rationale.strongest_counterargument || '';
+
+  // Determine decision color
+  const getDecisionColor = (decision: string) => {
+    if (decision === 'PROCEED') {
+      return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900', banner: 'bg-green-100 text-green-800' };
+    } else if (decision === 'PROCEED WITH CAUTION') {
+      return { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-900', banner: 'bg-yellow-100 text-yellow-800' };
+    } else {
+      return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900', banner: 'bg-red-100 text-red-800' };
+    }
+  };
+
+  const colors = getDecisionColor(decision);
 
   return (
     <div className="space-y-8">
-      {/* Build Decision Card */}
-      {decision && (
-        <div className="card">
-          <div className="mb-6">
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">Build Decision</h2>
+      {/* Decision Banner */}
+      <div className={`card ${colors.bg} border-2 ${colors.border}`}>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">Build Decision</h2>
             <div
               className={`
-                inline-block px-4 py-2 rounded-lg font-semibold text-lg
-                ${
-                  decision === 'build'
-                    ? 'bg-green-100 text-green-800'
-                    : decision === 'pivot'
-                      ? 'bg-yellow-100 text-yellow-800'
-                      : 'bg-red-100 text-red-800'
-                }
+                inline-block px-6 py-3 rounded-lg font-bold text-xl
+                ${colors.banner}
               `}
             >
-              {decision.toUpperCase()}
+              {decision}
             </div>
           </div>
+        </div>
 
-          {/* Build Score */}
-          {buildScore !== null && (
-            <div className="mb-6">
-              <div className="flex items-end gap-4">
-                <div>
-                  <p className="text-sm font-medium text-slate-600 mb-1">
-                    BuildScore
-                  </p>
-                  <p className="text-4xl font-bold text-blue-600">{buildScore}</p>
-                  <p className="text-sm text-slate-500 mt-1">out of 100</p>
-                </div>
-                <div className="flex-1">
-                  <div className="w-full bg-slate-200 rounded-full h-3">
-                    <div
-                      className={`h-3 rounded-full transition-all ${
-                        buildScore >= 70
-                          ? 'bg-green-500'
-                          : buildScore >= 50
-                            ? 'bg-yellow-500'
-                            : 'bg-red-500'
-                      }`}
-                      style={{ width: `${buildScore}%` }}
-                    />
+        {/* Confidence Score */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-semibold text-slate-700">Decision Confidence</p>
+            <p className="text-lg font-bold text-slate-900">{confidence}%</p>
+          </div>
+          <div className="w-full bg-slate-200 rounded-full h-3">
+            <div
+              className={`h-3 rounded-full transition-all ${
+                confidence >= 75
+                  ? 'bg-green-500'
+                  : confidence >= 50
+                    ? 'bg-yellow-500'
+                    : 'bg-red-500'
+              }`}
+              style={{ width: `${confidence}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Counterargument */}
+        {counterargument && (
+          <div className="mt-4 p-4 bg-slate-100 rounded-lg border border-slate-300">
+            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Strongest Counterargument</p>
+            <p className="text-slate-700 text-sm">{counterargument}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Primary Factors */}
+      {primaryFactors.length > 0 && (
+        <div className="card">
+          <h3 className="text-xl font-bold text-slate-900 mb-4">Key Decision Factors</h3>
+          <div className="space-y-3">
+            {primaryFactors.map((factor: any, idx: number) => {
+              const isSupporting = factor.direction === 'supports';
+              return (
+                <div
+                  key={idx}
+                  className={`flex gap-4 p-4 rounded-lg border ${
+                    isSupporting
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-red-50 border-red-200'
+                  }`}
+                >
+                  <span className={`flex-shrink-0 font-bold text-xl ${isSupporting ? 'text-green-600' : 'text-red-600'}`}>
+                    {isSupporting ? '✓' : '✗'}
+                  </span>
+                  <div className="flex-1">
+                    <p className={`font-semibold ${isSupporting ? 'text-green-900' : 'text-red-900'}`}>
+                      {factor.factor}
+                    </p>
+                    <p className={`text-sm mt-1 ${isSupporting ? 'text-green-700' : 'text-red-700'}`}>
+                      {isSupporting ? 'Supports' : 'Opposes'} the decision
+                    </p>
                   </div>
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* Confidence */}
-          {confidence > 0 && (
-            <div>
-              <p className="text-sm font-medium text-slate-600 mb-2">
-                Analysis Confidence
-              </p>
-              <div className="flex items-center gap-3">
-                <div className="flex-1 bg-slate-200 rounded-full h-2">
-                  <div
-                    className="h-2 bg-blue-500 rounded-full"
-                    style={{ width: `${confidence}%` }}
-                  />
-                </div>
-                <span className="text-sm font-semibold text-slate-700 min-w-fit">
-                  {confidence}%
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Problem Definition */}
-      {results?.define_agent?.problem_statement && (
-        <div className="card">
-          <h3 className="text-xl font-bold text-slate-900 mb-4">Problem Definition</h3>
-          <p className="text-slate-700 leading-relaxed">
-            {results.define_agent.problem_statement}
-          </p>
-          {results.define_agent.why_now && (
-            <div className="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
-              <p className="text-sm font-medium text-slate-600 mb-2">Why Now</p>
-              <p className="text-slate-700">{results.define_agent.why_now}</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Market Research */}
-      {results?.research_agent && (
-        <div className="card">
-          <h3 className="text-xl font-bold text-slate-900 mb-4">Market Research</h3>
-          <div className="grid gap-6">
-            {results.research_agent.market_analysis && (
-              <div>
-                <h4 className="font-semibold text-slate-800 mb-2">Market Analysis</h4>
-                <p className="text-slate-700">
-                  {results.research_agent.market_analysis.summary ||
-                    'Market analysis in progress...'}
-                </p>
-              </div>
-            )}
-            {results.research_agent.competitor_analysis && (
-              <div>
-                <h4 className="font-semibold text-slate-800 mb-2">
-                  Competitive Landscape
-                </h4>
-                <p className="text-slate-700">
-                  {results.research_agent.competitor_analysis.summary ||
-                    'Competitive analysis in progress...'}
-                </p>
-              </div>
-            )}
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* Strategy */}
-      {results?.strategy_agent && (
-        <div className="card">
-          <h3 className="text-xl font-bold text-slate-900 mb-4">Go-to-Market Strategy</h3>
-          <div className="space-y-4">
-            {results.strategy_agent.strategy_recommendation && (
-              <p className="text-slate-700">
-                {results.strategy_agent.strategy_recommendation}
-              </p>
-            )}
-            {results.strategy_agent.mvp_plan && (
-              <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                <p className="text-sm font-medium text-slate-600 mb-2">MVP Plan</p>
-                <p className="text-slate-700">
-                  {results.strategy_agent.mvp_plan}
-                </p>
-              </div>
-            )}
+      {/* Fastest Next Action */}
+      {nextAction.action && (
+        <div className="card bg-blue-50 border-2 border-blue-200">
+          <div className="mb-2">
+            <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">Next Action</p>
+            <h3 className="text-xl font-bold text-blue-900 mt-2">{nextAction.action}</h3>
           </div>
+          {nextAction.expected_learning && (
+            <p className="text-blue-700 mt-3">
+              <span className="font-semibold">Expected learning:</span> {nextAction.expected_learning}
+            </p>
+          )}
+          {nextAction.effort && (
+            <p className="text-sm text-blue-600 mt-2">
+              <span className="font-semibold">Effort:</span> {nextAction.effort}
+            </p>
+          )}
         </div>
       )}
 
-      {/* Key Risks */}
+      {/* Open Risks */}
       {risks.length > 0 && (
         <div className="card">
-          <h3 className="text-xl font-bold text-slate-900 mb-4">Key Risks & Caveats</h3>
+          <h3 className="text-xl font-bold text-slate-900 mb-4">Open Risks</h3>
           <div className="space-y-3">
             {risks.map((risk: any, idx: number) => (
-              <div key={idx} className="flex gap-3 p-3 bg-red-50 rounded-lg border border-red-200">
-                <span className="text-red-600 font-bold flex-shrink-0">⚠</span>
-                <div>
-                  <p className="font-semibold text-red-900 text-sm">{risk.type}</p>
-                  <p className="text-red-700 text-sm">{risk.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Recommended Next Actions */}
-      {nextSteps.length > 0 && (
-        <div className="card">
-          <h3 className="text-xl font-bold text-slate-900 mb-4">Recommended Next Steps</h3>
-          <div className="space-y-3">
-            {nextSteps.map((step: any, idx: number) => (
-              <div key={idx} className="flex gap-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <span className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-200 text-blue-900 font-bold flex items-center justify-center">
-                  {idx + 1}
-                </span>
+              <div key={idx} className="flex gap-3 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                <span className="text-amber-600 font-bold flex-shrink-0 text-lg">⚠</span>
                 <div className="flex-1">
-                  <p className="font-semibold text-slate-900">{step.action}</p>
-                  <p className="text-sm text-slate-600 mt-1">{step.expected_signal}</p>
+                  <p className="font-semibold text-amber-900">{risk.risk}</p>
+                  <p className="text-amber-700 text-sm mt-1">
+                    <span className="font-semibold">Severity:</span> {risk.severity}
+                  </p>
+                  {risk.mitigation_status && (
+                    <p className="text-amber-700 text-sm mt-1">
+                      <span className="font-semibold">Status:</span> {risk.mitigation_status}
+                    </p>
+                  )}
                 </div>
               </div>
             ))}
@@ -195,18 +163,26 @@ export function ResultsDisplay({ results, isLoading }: ResultsDisplayProps) {
         </div>
       )}
 
-      {/* Raw JSON */}
+      {/* Raw JSON (Collapsed) */}
       {results && (
         <div className="card">
           <details className="group">
-            <summary className="cursor-pointer font-semibold text-slate-900 hover:text-blue-600">
-              Full Analysis JSON
+            <summary
+              className="cursor-pointer font-semibold text-slate-900 hover:text-blue-600 flex items-center gap-2 select-none"
+              onClick={() => setShowRawJson(!showRawJson)}
+            >
+              <span className={`transform transition-transform ${showRawJson ? 'rotate-90' : ''}`}>
+                ▶
+              </span>
+              Full Analysis JSON (Developer View)
             </summary>
-            <div className="mt-4 p-4 bg-slate-900 rounded-lg overflow-x-auto">
-              <pre className="text-xs text-slate-100 font-mono">
-                {JSON.stringify(results, null, 2)}
-              </pre>
-            </div>
+            {showRawJson && (
+              <div className="mt-4 p-4 bg-slate-900 rounded-lg overflow-x-auto max-h-96">
+                <pre className="text-xs text-slate-100 font-mono">
+                  {JSON.stringify(results, null, 2)}
+                </pre>
+              </div>
+            )}
           </details>
         </div>
       )}

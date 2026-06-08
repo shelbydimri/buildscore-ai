@@ -201,7 +201,12 @@ export class Orchestrator {
       const action = verification.pipeline_recommendation.action;
 
       if (action === 'return_to_define') {
-        // Gate — Problem root: the problem definition itself is broken; looping cannot fix it
+        // If at max loop count, proceed to CEO with caveat instead of halting.
+        // The problem definition is broken, but continuing loops won't help; CEO must see the unresolved issue.
+        if (run.loop_count >= MAX_LOOP_COUNT) {
+          break;
+        }
+        // Before max loops, halt for founder feedback.
         throw new HaltSignal(
           'return_to_define',
           'critic-agent',

@@ -17,21 +17,33 @@ export function ResultsDisplay({ results, isLoading }: ResultsDisplayProps) {
   // Extract CEO decision from results
   const ceoDecision = results.ceo_decision || results.startup_validation_output || {};
   const decision = ceoDecision.decision || 'UNKNOWN';
-  const confidence = ceoDecision.decision_confidence || 0;
+
+  // Handle confidence as 0-1 or 0-100
+  let confidence = ceoDecision.decision_confidence || 0;
+  if (confidence <= 1) {
+    confidence = confidence * 100;
+  }
+  confidence = Math.round(confidence);
+
   const rationale = ceoDecision.decision_rationale || {};
   const risks = ceoDecision.open_risks || [];
   const nextAction = ceoDecision.fastest_next_action || {};
   const primaryFactors = rationale.primary_factors || [];
   const counterargument = rationale.strongest_counterargument || '';
 
-  // Determine decision color
+  // Determine decision color based on decision text
   const getDecisionColor = (decision: string) => {
-    if (decision === 'PROCEED') {
-      return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900', banner: 'bg-green-100 text-green-800' };
-    } else if (decision === 'PROCEED WITH CAUTION') {
-      return { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-900', banner: 'bg-yellow-100 text-yellow-800' };
+    const upperDecision = decision.toUpperCase();
+    if (upperDecision.includes('PROCEED') && !upperDecision.includes('CAUTION')) {
+      return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900', banner: 'bg-green-600 text-white' };
+    } else if (upperDecision.includes('CAUTION') || decision === 'CAUTION') {
+      return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900', banner: 'bg-amber-500 text-white' };
+    } else if (upperDecision.includes('BUILD')) {
+      return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900', banner: 'bg-green-600 text-white' };
+    } else if (upperDecision.includes('ABANDON') || upperDecision.includes('PIVOT')) {
+      return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900', banner: 'bg-red-600 text-white' };
     } else {
-      return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900', banner: 'bg-red-100 text-red-800' };
+      return { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-900', banner: 'bg-slate-600 text-white' };
     }
   };
 

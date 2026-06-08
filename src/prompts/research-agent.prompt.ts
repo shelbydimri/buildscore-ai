@@ -12,12 +12,12 @@ function extractFounderContext(brief: string | undefined): string {
 }
 
 export const MARKET_ANALYSIS_SYSTEM_PROMPT = readFileSync(
-  resolve(SKILLS, 'market-analysis/SKILL.md'),
+  resolve(SKILLS, 'market-analysis/SKILL-groq.md'),
   'utf-8',
 );
 
 export const COMPETITOR_ANALYSIS_SYSTEM_PROMPT = readFileSync(
-  resolve(SKILLS, 'competitor-analysis/SKILL.md'),
+  resolve(SKILLS, 'competitor-analysis/SKILL-groq.md'),
   'utf-8',
 );
 

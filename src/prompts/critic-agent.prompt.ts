@@ -5,7 +5,7 @@ import { MODELS, type CompletionRequest } from '../llm/anthropic-client';
 import type { CriticAgentInput } from '../../types/agent-types';
 
 export const SYSTEM_PROMPT = readFileSync(
-  resolve(dirname(fileURLToPath(import.meta.url)), '../../.claude/skills/verification/SKILL.md'),
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../.claude/skills/verification/SKILL-groq.md'),
   'utf-8',
 );
 

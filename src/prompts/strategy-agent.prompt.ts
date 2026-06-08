@@ -5,7 +5,7 @@ import { MODELS, type CompletionRequest } from '../llm/anthropic-client';
 import type { StrategyAgentInput } from '../../types/agent-types';
 
 export const SYSTEM_PROMPT = readFileSync(
-  resolve(dirname(fileURLToPath(import.meta.url)), '../../.claude/skills/mvp-planning/SKILL.md'),
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../.claude/skills/mvp-planning/SKILL-groq.md'),
   'utf-8',
 );
 

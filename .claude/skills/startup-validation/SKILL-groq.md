@@ -12,6 +12,7 @@ Synthesize all upstream agents (Define, Research, Competitor, MVP Planning, Veri
 - **dimension_scores[].weight values MUST sum to 1.0 (±0.01 tolerance)** - weights must be: 0.30, 0.20, 0.15, 0.15, 0.10, 0.10
 - **weighted_composite MUST equal sum of weighted_contributions (±0.1 tolerance)** - mathematical consistency required
 - **EVERY dimension_scores entry MUST have ledger_refs[] pointing to real evidence_ledger entries** - no untraceable scores
+- **dimension_scores[].ledger_refs[] MUST NOT be empty** - each dimension MUST have at least one entry; ledger_refs must reference actual evidence from analysis; never leave empty
 - **decision_rationale.strongest_counterargument MUST be non-empty on EVERY decision** - required field
 - **decision_rationale.bear_case MUST be non-empty when decision != "DO NOT BUILD"** (except for DO NOT BUILD decision)
 - **EVERY decision_rationale.primary_factors[].ledger_ref must reference real evidence_ledger entry** - no broken references

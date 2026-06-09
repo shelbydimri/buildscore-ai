@@ -141,11 +141,25 @@ export class CEOAgent {
   // ── Dimension scores ───────────────────────────────────────────────────────
 
   private validateDimensionScores(output: StartupValidationOutput, ledgerIds: Set<string>): void {
-    if (!Array.isArray(output.dimension_scores) || output.dimension_scores.length !== 6) {
+    // Check if dimension_scores is missing or not an array
+    if (!Array.isArray(output.dimension_scores)) {
       throw new LLMError(
-        `CEOAgent: dimension_scores must have exactly 6 entries, found ${
-          Array.isArray(output.dimension_scores) ? output.dimension_scores.length : 'non-array'
-        }`,
+        'CEOAgent: dimension_scores is missing or not an array — model must score all 6 dimensions (user_pain, market_potential, competitive_advantage, monetization, mvp_feasibility, execution_complexity)',
+        output,
+      );
+    }
+
+    // Check if dimension_scores has exactly 6 entries
+    if (output.dimension_scores.length === 0) {
+      throw new LLMError(
+        'CEOAgent: dimension_scores array is empty — model must return exactly 6 dimension entries, one for each scoring dimension',
+        output,
+      );
+    }
+
+    if (output.dimension_scores.length !== 6) {
+      throw new LLMError(
+        `CEOAgent: dimension_scores must have exactly 6 entries, found ${output.dimension_scores.length} — expected: user_pain, market_potential, competitive_advantage, monetization, mvp_feasibility, execution_complexity`,
         output,
       );
     }

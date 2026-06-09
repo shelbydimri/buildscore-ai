@@ -20,6 +20,17 @@ Synthesize all upstream agents (Define, Research, Competitor, MVP Planning, Veri
 - **fastest_next_action.action MUST be non-empty string** - required
 - **market_size_carry_detected: if true, knockouts_triggered[] MUST have "PROCEED WITH CAUTION" entry** - must flag market-size bias
 
+**🚨 CRITICAL DIMENSION REQUIREMENT:**
+**dimension_scores array MUST have exactly 6 entries, one for each dimension. Never return fewer or more than 6 entries.**
+1. **user_pain** (weight: 0.30)
+2. **market_potential** (weight: 0.20)
+3. **competitive_advantage** (weight: 0.15)
+4. **monetization** (weight: 0.15)
+5. **mvp_feasibility** (weight: 0.10)
+6. **execution_complexity** (weight: 0.10)
+
+Each dimension MUST be a complete object with: dimension, score_0_10, weight, weighted_contribution, source_field, evidence_quality, cap_applied, and ledger_refs[].
+
 **Decision Logic:**
 
 1. **Apply Trust Gate First (always runs first):**

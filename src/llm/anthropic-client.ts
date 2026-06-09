@@ -1,11 +1,11 @@
-import Groq from 'groq-sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // ── Model IDs ─────────────────────────────────────────────────────────────────
 
 export const MODELS = {
-  OPUS:   'llama-3.3-70b-versatile',
-  SONNET: 'llama-3.3-70b-versatile',
-  HAIKU:  'llama-3.3-70b-versatile',
+  OPUS:   'gemini-2.0-flash-001',
+  SONNET: 'gemini-2.0-flash-001',
+  HAIKU:  'gemini-2.0-flash-001',
 } as const;
 
 export type ModelId = (typeof MODELS)[keyof typeof MODELS];
@@ -13,7 +13,7 @@ export type ModelId = (typeof MODELS)[keyof typeof MODELS];
 // ── Client configuration ──────────────────────────────────────────────────────
 
 export interface ClientConfig {
-  /** Retries on network errors via SDK exponential backoff. Default: 3. */
+  /** Retries on network errors. Default: 3. */
   maxRetries?: number;
   /** Global per-request timeout in milliseconds. Default: 120_000 (2 min). */
   timeoutMs?:  number;
@@ -21,20 +21,19 @@ export interface ClientConfig {
 
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_TIMEOUT_MS  = 120_000;
-const TPM_RESET_DELAY_MS  = 61_000; // 61 seconds to reset Groq's TPM window
 
 // ── Request / response types ──────────────────────────────────────────────────
 
 export interface CompletionRequest {
   model:                ModelId;
   system:               string;
-  messages:             Groq.Chat.ChatCompletionMessageParam[];
+  messages:             Array<{ role: string; content: string }>;
   max_tokens:           number;
   temperature?:         number;
   /** Overrides the global timeout for this specific request. */
   timeout_ms?:          number;
   /**
-   * Cache control (kept for API compatibility, not used by Groq).
+   * Cache control (kept for API compatibility, not used by Gemini).
    */
   cache_system_prompt?: boolean;
 }
@@ -60,7 +59,7 @@ export class LLMError extends Error {
   }
 }
 
-/** Thrown when GROQ_API_KEY is missing or the key is rejected (401). */
+/** Thrown when GEMINI_API_KEY is missing or the key is rejected (401). */
 export class LLMAuthError extends LLMError {
   constructor(message: string, cause?: unknown) {
     super(message, cause, 401);
@@ -68,7 +67,7 @@ export class LLMAuthError extends LLMError {
   }
 }
 
-/** Thrown after the SDK exhausts all retries on rate limit responses. */
+/** Thrown after exhausting all retries on rate limit responses. */
 export class LLMRateLimitError extends LLMError {
   constructor(message: string, cause?: unknown) {
     super(message, cause, 429);
@@ -88,20 +87,15 @@ export class LLMTimeoutError extends LLMError {
 
 export class AnthropicClient {
   private static instance: AnthropicClient | null = null;
-  private readonly sdk:    Groq;
+  private readonly sdk:    GoogleGenerativeAI;
   private readonly config: Required<ClientConfig>;
-  private lastCallTime: number = 0;
 
   private constructor(apiKey: string, config: ClientConfig) {
     this.config = {
       maxRetries: config.maxRetries ?? DEFAULT_MAX_RETRIES,
       timeoutMs:  config.timeoutMs  ?? DEFAULT_TIMEOUT_MS,
     };
-    this.sdk = new Groq({
-      apiKey,
-      timeout: this.config.timeoutMs,
-      maxRetries: this.config.maxRetries,
-    });
+    this.sdk = new GoogleGenerativeAI(apiKey);
   }
 
   /**
@@ -111,9 +105,9 @@ export class AnthropicClient {
   static getInstance(config?: ClientConfig): AnthropicClient {
     if (AnthropicClient.instance) return AnthropicClient.instance;
 
-    const apiKey = process.env['GROQ_API_KEY'];
+    const apiKey = process.env['GEMINI_API_KEY'];
     if (!apiKey) {
-      throw new LLMAuthError('GROQ_API_KEY environment variable is not set');
+      throw new LLMAuthError('GEMINI_API_KEY environment variable is not set');
     }
 
     AnthropicClient.instance = new AnthropicClient(apiKey, config ?? {});
@@ -123,56 +117,62 @@ export class AnthropicClient {
   // ── complete ──────────────────────────────────────────────────────────────
 
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
-    // Wait until TPM window resets if needed (60+ seconds since last call)
-    await this.waitForTPMReset();
-
     // Retry loop: first attempt + 2 retries on rate limit
     for (let attempt = 0; attempt <= 2; attempt++) {
       try {
-        // Groq expects system as part of messages array, not separate parameter
-        const messages: Groq.Chat.ChatCompletionMessageParam[] = [
-          { role: 'system', content: request.system },
-          ...request.messages,
-        ];
-
-        console.log(`[Groq] Attempt ${attempt + 1}: ${request.model} request with ${messages.reduce((sum, m) => sum + (m.content?.length || 0), 0)} total chars`);
-
-        const response = await this.sdk.chat.completions.create({
-          model:       request.model,
-          messages:    messages,
-          max_tokens:  request.max_tokens,
-          temperature: request.temperature,
+        const model = this.sdk.getGenerativeModel({
+          model: request.model,
+          systemInstruction: request.system,
         });
 
-        const choice = response.choices[0];
-        if (!choice || choice.message.role !== 'assistant' || !choice.message.content) {
-          throw new LLMError('API response contained no assistant message', response);
+        const totalChars = request.system.length +
+          request.messages.reduce((sum, m) => sum + m.content.length, 0);
+        console.log(`[Gemini] Attempt ${attempt + 1}: ${request.model} request with ${totalChars} total chars`);
+
+        // Build conversation history from messages
+        const history = request.messages.slice(0, -1).map(msg => ({
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: msg.content }],
+        }));
+
+        // Send the last message
+        const chat = model.startChat({ history });
+        const lastMessage = request.messages[request.messages.length - 1]?.content || '';
+
+        const result = await chat.sendMessage(lastMessage);
+        const response = result.response;
+        const text = response.text();
+
+        if (!text) {
+          throw new LLMError('API response contained no text', response);
         }
 
-        this.lastCallTime = Date.now();
-        const inputTokens = response.usage.prompt_tokens;
-        const outputTokens = response.usage.completion_tokens;
+        const usageMetadata = response.usageMetadata;
+        const inputTokens = usageMetadata?.promptTokenCount || 0;
+        const outputTokens = usageMetadata?.candidatesTokenCount || 0;
         const totalTokens = inputTokens + outputTokens;
-        console.log(`[Groq Tokens] Input: ${inputTokens}, Output: ${outputTokens}, Total: ${totalTokens}`);
+        console.log(`[Gemini Tokens] Input: ${inputTokens}, Output: ${outputTokens}, Total: ${totalTokens}`);
+
         return {
-          text:          choice.message.content,
-          model:         response.model,
+          text,
+          model: request.model,
           input_tokens:  inputTokens,
           output_tokens: outputTokens,
-          stop_reason:   choice.finish_reason || 'unknown',
+          stop_reason:   response.candidates?.[0]?.finishReason || 'unknown',
         };
       } catch (err) {
         const isRateLimit = isRateLimitError(err);
 
         if (isRateLimit && attempt < 2) {
-          // Rate limit: wait 61 seconds and retry
-          console.warn(`[Groq] Rate limit hit on attempt ${attempt + 1}. Waiting 61s before retry...`);
-          await this.sleep(TPM_RESET_DELAY_MS);
+          // Rate limit: wait and retry
+          const waitTime = 5000 * Math.pow(2, attempt); // 5s, 10s, 20s
+          console.warn(`[Gemini] Rate limit hit on attempt ${attempt + 1}. Waiting ${waitTime}ms before retry...`);
+          await this.sleep(waitTime);
           continue;
         }
 
         // Last attempt failed or non-rate-limit error: throw
-        console.error('[Groq] Error:', err instanceof Error ? err.message : err);
+        console.error('[Gemini] Error:', err instanceof Error ? err.message : err);
         throw mapError(err, this.config.timeoutMs);
       }
     }
@@ -188,7 +188,7 @@ export class AnthropicClient {
 
     let parsed: unknown;
     try {
-      // Strip markdown code fences that models sometimes wrap around JSON
+      // Strip markdown code fences that Gemini sometimes wraps around JSON
       const cleaned = response.text
         .replace(/```json\n?/g, '')
         .replace(/```\n?/g, '')
@@ -206,15 +206,6 @@ export class AnthropicClient {
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
-  private async waitForTPMReset(): Promise<void> {
-    const timeSinceLastCall = Date.now() - this.lastCallTime;
-    if (timeSinceLastCall < TPM_RESET_DELAY_MS) {
-      const waitTime = TPM_RESET_DELAY_MS - timeSinceLastCall;
-      console.log(`[Groq] Waiting ${Math.ceil(waitTime / 1000)}s to reset TPM window...`);
-      await this.sleep(waitTime);
-    }
-  }
-
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -230,40 +221,42 @@ export class AnthropicClient {
 // ── Module-level helpers ──────────────────────────────────────────────────────
 
 function isRateLimitError(err: unknown): boolean {
-  if (err instanceof Groq.RateLimitError) return true;
-  if (err instanceof Groq.APIError && err.status === 413) return true;
+  if (err instanceof Error) {
+    return err.message.includes('429') || err.message.includes('too many requests') ||
+           err.message.includes('rate limit') || err.message.includes('RESOURCE_EXHAUSTED');
+  }
   return false;
 }
 
 function mapError(err: unknown, timeoutMs: number): LLMError {
   if (err instanceof LLMError) return err;
 
-  // Check for Groq-specific errors
-  if (err instanceof Groq.APIConnectionTimeoutError) {
+  if (!(err instanceof Error)) {
+    return new LLMError(`Gemini API error: ${String(err)}`);
+  }
+
+  // Check for timeout
+  if (err.message.includes('timeout') || err.message.includes('Timeout')) {
     return new LLMTimeoutError(`Request timed out after ${timeoutMs}ms`, err);
   }
 
-  if (err instanceof Groq.AuthenticationError) {
+  // Check for auth errors
+  if (err.message.includes('401') || err.message.includes('UNAUTHENTICATED') ||
+      err.message.includes('API key') || err.message.includes('INVALID_ARGUMENT')) {
     return new LLMAuthError(
-      'Authentication failed — check GROQ_API_KEY',
+      'Authentication failed — check GEMINI_API_KEY',
       err,
     );
   }
 
-  if (err instanceof Groq.RateLimitError) {
+  // Check for rate limit
+  if (err.message.includes('429') || err.message.includes('too many requests') ||
+      err.message.includes('rate limit') || err.message.includes('RESOURCE_EXHAUSTED')) {
     return new LLMRateLimitError(
       `Rate limit exceeded: ${err.message}`,
       err,
     );
   }
 
-  if (err instanceof Groq.APIError) {
-    return new LLMError(
-      `Groq API error ${err.status}: ${err.message}`,
-      err,
-      err.status,
-    );
-  }
-
-  return new LLMError(`Groq API error: ${err instanceof Error ? err.message : String(err)}`, err);
+  return new LLMError(`Gemini API error: ${err.message}`, err);
 }
